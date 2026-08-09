@@ -6,7 +6,7 @@ Ce document existe pour qu'on ne nettoie pas `reporting` au jugé.
 ## Le constat qui change la nature du lot
 
 `audit_bim/query` était une façade : 152 lignes de pur passe-plat, supprimées
-sans conséquence. **`reporting` n'en est pas une.** 23 modules, **8 567 lignes**,
+sans conséquence. **`reporting` n'en est pas une.** 23 modules, **8 590 lignes**,
 dont **5 015 dans dix modules qui écrivent un fichier**.
 
 | Nature | Modules | Lignes |
@@ -14,7 +14,7 @@ dont **5 015 dans dix modules qui écrivent un fichier**.
 | Façade pure vers `bim-reporting` | 0 | — |
 | Sans attache directe mesurée | 2 | 7 |
 | Lié au livrable I3F par ses appelants | 9 | 2 475 |
-| Orchestration I3F | 12 | **6 085** |
+| Orchestration I3F | 12 | **6 108** |
 
 **Aucune catégorie ne s'appelle « neutre »**, et c'est délibéré. Le mot serait lu
 comme « extractible » par le lot suivant, alors que la mesure ne dit que « aucune

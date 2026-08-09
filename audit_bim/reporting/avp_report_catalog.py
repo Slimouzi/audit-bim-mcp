@@ -86,6 +86,21 @@ class ReportSpec:
     ``key`` est la clé MOA-facing (ordre du CTO). ``deliverable_key`` fait le
     lien avec ``avp_i3f._DELIVERABLE_LABELS`` / le pack (le nom interne diffère :
     ``surface_enveloppe`` ↔ ``enveloppe``, ``controle_maquettes`` ↔ ``controle``).
+
+    ``expected_sheets`` / ``headers`` / ``critical_formulas`` décrivent le
+    **classeur que nous produisons**, et non le gabarit MOA : c'est ce que le
+    catalogue promet à qui lit le contrat. Un décalage y est particulièrement
+    trompeur — le module ne lisant ni ne générant rien, rien ne le contredit à
+    l'exécution. ``tests/unit/test_avp_catalogue_vs_sortie.py`` confronte donc
+    ces trois champs au classeur réellement écrit.
+
+    Exception assumée et **nommée dans ce test** : trois rapports portent encore
+    des ``critical_formulas`` épinglées à la géométrie du gabarit MOA
+    (``SUM(D2:D10)``, ``COUNTA(D2:D16)``, ``E22/D22-1``…) plutôt qu'à notre
+    sortie. Les figer serait un défaut à part entière — le compteur Fenêtres ne
+    doit pas dépendre des 15 types du gabarit — mais les laisser décrire deux
+    choses dans un même champ en est un autre. Dette explicite, non élargie :
+    le test échoue si un quatrième rapport y tombe.
     """
 
     key: str
@@ -197,19 +212,25 @@ REPORT_SPECS: tuple[ReportSpec, ...] = (
         label="export SHAB maquette",
         deliverable_key="shab",
         example_filename="260201 Tatare 0546L AVP - export SHAB maquette.xlsx",
-        expected_sheets=("Feuil1", "TDB 2022 01.3 - Export Zones..."),
+        expected_sheets=("Feuil1", "TDB 2022 01.3 - Export Zones...", "Note de méthode"),
         headers=(
             "Composant",
             "Nom Zone",
             "Type de Zone",
+            "Groupes",
             "Pièce",
             "Type Pièce",
             "Surface IFC OpenShell",
             "Surface Nette (Qté de Base)",
             "Étage",
             "Surface Brute (Qté de Base)",
+            "Couleur",
+            "écarts",
         ),
-        critical_formulas=('IF(Gn-Hn=0,"",Gn-Hn)',),
+        critical_formulas=(
+            'IF(OR(Gn="",Hn=""),"",IF(Hn/Gn-1=0,"",Hn/Gn-1))',
+            "SUBTOTAL(9,Ln:Ln)",
+        ),
         requirements=(
             DataRequirement("IfcSpace", "Espaces (IfcSpace)", "ifc_entity", ("IfcSpace",)),
             DataRequirement(
@@ -241,8 +262,10 @@ REPORT_SPECS: tuple[ReportSpec, ...] = (
             "Surface Nette (Qté de Base)",
             "Étage",
             "Surface Brute (Qté de Base)",
+            "Couleur",
+            "écarts",
         ),
-        critical_formulas=('IF(Hn/Gn-1=0,"",Hn/Gn-1)',),
+        critical_formulas=('IF(OR(Gn="",Hn=""),"",IF(Hn/Gn-1=0,"",Hn/Gn-1))',),
         requirements=(
             DataRequirement("IfcZone", "Zones (IfcZone)", "ifc_entity", ("IfcZone",)),
             DataRequirement("IfcSpace", "Espaces (IfcSpace)", "ifc_entity", ("IfcSpace",)),
