@@ -1173,48 +1173,43 @@ def generate_avp_i3f_pack(
         ``{output_dir, paths, analyse_docx, analyse_pdf, pdf_available}`` ou
         ``{status: needs_context, missing, questions}``.
     """
-    from ...reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
+    # La règle de sélection vit dans le CŒUR : ce tool ne fait que traduire son
+    # refus en payload MCP. Deux copies auraient divergé — c'est exactement ce
+    # qui s'est produit quand le tool validait pendant que le cœur ignorait.
+    from ...reporting.avp.models import AvpReportSelectionError
+    from ...reporting.avp.pack import _normalize_report_selection
     from ...reporting.avp_sources import AvpSourcePaths, load_sources, read_envelope_json
 
-    # Validation de la SÉLECTION, avant toute écriture. Une clé inconnue est
-    # refusée plutôt qu'ignorée : une faute de frappe qui produirait
-    # silencieusement autre chose que ce qui est demandé est pire qu'une erreur.
-    bloques = {
-        cle: spec.blocked_reason
-        for cle, spec in REPORT_SPECS_BY_KEY.items()
-        if spec.blocked_reason is not None
-    }
-    selection = None if reports is None else list(dict.fromkeys(reports))
-    if selection is not None:
-        inconnues = sorted(set(selection) - set(REPORT_SPECS_BY_KEY))
-        if inconnues:
+    try:
+        _normalize_report_selection(reports)
+    except AvpReportSelectionError as refus:
+        if refus.unknown:
             return {
                 "status": "error",
                 "error": "unknown_report",
-                "unknown_reports": inconnues,
-                "known_reports": sorted(REPORT_SPECS_BY_KEY),
+                "unknown_reports": list(refus.unknown),
+                "known_reports": list(refus.known),
                 "message": (
                     "Clé(s) de rapport inconnue(s) : "
-                    + ", ".join(inconnues)
+                    + ", ".join(refus.unknown)
                     + ". Aucun fichier n'a été écrit."
                 ),
                 "next_step": "Utiliser les clés de ``list_avp_i3f_xls_reports``.",
             }
-        demandes_bloques = sorted(set(selection) & set(bloques))
-        if demandes_bloques:
-            return {
-                "status": "error",
-                "error": "report_blocked",
-                "blocked_reports": {c: bloques[c] for c in demandes_bloques},
-                "message": (
-                    "Rapport(s) non produisibles : "
-                    + ", ".join(f"{c} — {bloques[c]}" for c in demandes_bloques)
-                ),
-                "next_step": (
-                    "Retirer ce(s) rapport(s) de ``reports``, ou définir la règle "
-                    "métier manquante. Aucun fichier n'a été écrit."
-                ),
-            }
+        return {
+            "status": "error",
+            "error": "report_blocked",
+            "blocked_reports": dict(refus.blocked),
+            "message": (
+                "Rapport(s) non produisibles : "
+                + ", ".join(f"{c} — {m}" for c, m in sorted(refus.blocked.items()))
+            ),
+            "next_step": (
+                "Retirer ce(s) rapport(s) de ``reports``, ou définir la règle "
+                "métier manquante. Aucun fichier n'a été écrit."
+            ),
+        }
+    selection = None if reports is None else list(dict.fromkeys(reports))
 
     context = _validate_avp_context(
         controle_xlsx=controle_xlsx,
