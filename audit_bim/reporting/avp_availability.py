@@ -29,11 +29,13 @@ from .avp_report_catalog import (
 )
 from .avp_snapshot import (
     _base_quantity_ordered,
+    _methode_comparable,
     _rich,
     _space_zone_uuid,
     _zone_member_uuids,
     _zone_members_from_tree,
     count_envelope_walls,
+    quantite_affichable,
 )
 
 # Reproduction « à l'identique » d'un classeur MOA = préservation des **formules
@@ -53,21 +55,33 @@ def _has_ifc_entity(snap: ModelSnapshot, classes: tuple[str, ...]) -> bool:
 
 
 def _has_base_quantity(snap: ModelSnapshot, classes: tuple[str, ...], quantity: str) -> bool:
-    """Vrai si **au moins une** entité des classes porte la BaseQuantity nommée."""
+    """Vrai si au moins une entité porte la BaseQuantity nommée **et affichable**.
+
+    « Présente dans un pset » ne suffit pas : la fusion y injecte la valeur
+    calculée quand la native manque, y compris lorsque sa méthode n'est pas
+    comparable — le writer l'écarte alors, et le rapport annoncerait disponible
+    un livrable dont les colonnes de mesure sortiraient vides.
+    """
     for cls in classes:
         for el in snap.of_class(cls):
-            if _base_quantity_ordered(_rich(snap, el), (quantity,)) is not None:
+            rich = _rich(snap, el)
+            if quantite_affichable(rich, _base_quantity_ordered(rich, (quantity,)), (quantity,)):
                 return True
     return False
 
 
 def _uses_computed_quantity(snap: ModelSnapshot, classes: tuple[str, ...], quantity: str) -> bool:
     """Vrai si la BaseQuantity nommée provient d'une **fusion calculée** (Lot 3)
-    sur au moins une entité des classes — signale un déblocage « partial_computed »."""
+    sur au moins une entité des classes — signale un déblocage « partial_computed ».
+
+    Une valeur dont la méthode n'est pas comparable ne débloque rien : elle
+    n'atteint aucune cellule. L'annoncer « partial_computed » promettrait un
+    livrable partiel là où il n'y a rien à écrire.
+    """
     for cls in classes:
         for el in snap.of_class(cls):
             for c in _rich(snap, el).get("computed_base_quantities") or []:
-                if c.get("quantity") == quantity:
+                if c.get("quantity") == quantity and _methode_comparable(c.get("method")):
                     return True
     return False
 

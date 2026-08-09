@@ -266,43 +266,65 @@ def count_menuiseries(snap: ModelSnapshot | None) -> int:
 # quantité attendue — et non le symptôme dans le fichier produit.
 
 
+def quantite_affichable(el: dict, valeur: float | None, qty_names: tuple[str, ...]) -> bool:
+    """Cette quantité atteindra-t-elle une cellule du livrable ?
+
+    **Une valeur non comparable peut être tracée et expliquée, mais elle ne doit
+    jamais satisfaire une condition de génération.** La fusion injecte la valeur
+    calculée dans le pset quand la native manque ; ``_base_quantity_ordered`` la
+    lit donc comme n'importe quelle autre, et la porte QA la comptait — alors
+    que le writer l'écarte ensuite si sa méthode n'est pas comparable. Résultat
+    mesuré : QA débloquée, puis une ligne de menuiserie dont **toutes** les
+    colonnes de mesure sont vides. Exactement le livrable que la gate
+    ``missing_quantities`` existe pour empêcher.
+
+    La porte et le writer passent désormais par la MÊME règle
+    (:func:`_mesures_natif_et_calcule`) : ce qui ne s'affiche pas ne débloque
+    rien.
+    """
+    natif, calcule = _mesures_natif_et_calcule(el, valeur, qty_names)
+    return natif is not None or calcule is not None
+
+
 def count_spaces_with_area(snap: ModelSnapshot | None) -> int:
-    """Espaces portant une surface exploitable (BaseQuantities ou repli)."""
+    """Espaces portant une surface **affichable** (BaseQuantities ou repli)."""
     if snap is None:
         return 0
     n = 0
     for item in snap.spaces or []:
-        surface, _src = _surface_with_source(_rich(snap, item), _SPACE_BQ_ORDER)
-        if surface is not None:
+        el = _rich(snap, item)
+        surface, _src = _surface_with_source(el, _SPACE_BQ_ORDER)
+        if quantite_affichable(el, surface, _SPACE_BQ_ORDER):
             n += 1
     return n
 
 
 def count_menuiseries_with_dimensions(snap: ModelSnapshot | None) -> int:
-    """Menuiseries portant une largeur **ou** une hauteur exploitable."""
+    """Menuiseries portant une largeur **ou** une hauteur **affichable**."""
     if snap is None:
         return 0
     n = 0
     for cls in _MENUISERIE_CLASSES:
         for item in snap.of_class(cls):
             el = _rich(snap, item)
-            if (
-                _base_quantity_ordered(el, ("Width", "OverallWidth")) is not None
-                or _base_quantity_ordered(el, ("Height", "OverallHeight")) is not None
-            ):
+            largeur = ("Width", "OverallWidth")
+            hauteur = ("Height", "OverallHeight")
+            if quantite_affichable(
+                el, _base_quantity_ordered(el, largeur), largeur
+            ) or quantite_affichable(el, _base_quantity_ordered(el, hauteur), hauteur):
                 n += 1
     return n
 
 
 def count_planchers_with_area(snap: ModelSnapshot | None) -> int:
-    """Dalles portant une aire exploitable (``NetArea`` et replis)."""
+    """Dalles portant une aire **affichable** (``NetArea`` et replis)."""
     if snap is None:
         return 0
     n = 0
     for cls in _SLAB_CLASSES:
         for item in snap.of_class(cls):
             el = _rich(snap, item)
-            if _base_quantity_ordered(el, _SLAB_BQ_ORDER) is not None:
+            if quantite_affichable(el, _base_quantity_ordered(el, _SLAB_BQ_ORDER), _SLAB_BQ_ORDER):
                 n += 1
     return n
 

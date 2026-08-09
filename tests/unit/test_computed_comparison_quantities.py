@@ -361,3 +361,116 @@ def test_une_methode_inconnue_nest_pas_comparable_par_defaut():
     doc["quantities"][0]["method"] = "methode_future_inconnue"
     merge_into_snapshot(snap, doc)
     assert _colonnes(snap)["CHAMBRE"] == (100.0, None)
+
+
+# ── Une valeur non comparable ne débloque aucune génération ────────────────
+
+
+def _snapshot_fenetre_sans_native() -> ModelSnapshot:
+    """Une fenêtre SANS aucune BaseQuantity : seule la fusion peut la doter."""
+    return ModelSnapshot(
+        project={"name": "P"},
+        model={"name": "M.ifc"},
+        elements=[{"uuid": "W1", "type": "IfcWindow", "name": "F25", "property_sets": []}],
+    ).index()
+
+
+def test_une_dimension_bbox_ne_debloque_pas_la_generation():
+    """Le trou que la garde bbox avait ouvert.
+
+    La fusion injecte la valeur calculée dans le pset quand la native manque.
+    ``_base_quantity_ordered`` la lisait alors comme n'importe quelle autre, et
+    la porte QA déclarait Menuiseries débloqué — pendant que le writer, lui,
+    écartait cette même valeur comme non comparable. Le pack produisait une
+    ligne de menuiserie dont TOUTES les colonnes de mesure étaient vides :
+    exactement ce que la gate ``missing_quantities`` existe pour empêcher.
+    """
+    from audit_bim.reporting.avp.pack import _qa_missing_quantities
+    from audit_bim.reporting.avp_snapshot import count_menuiseries_with_dimensions
+
+    snap = _snapshot_fenetre_sans_native()
+    assert _qa_missing_quantities(snap) == ["Menuiseries"], "état initial : rien à afficher"
+
+    merge_into_snapshot(snap, _contrat_bbox({"W1": (1.519, 2.3)}))
+
+    assert count_menuiseries_with_dimensions(snap) == 0, (
+        "une dimension bbox n'est pas affichable : elle ne doit pas être comptée"
+    )
+    assert _qa_missing_quantities(snap) == ["Menuiseries"], (
+        "la fusion d'une valeur non comparable a débloqué la génération"
+    )
+
+
+def test_une_dimension_comparable_debloque_bien_la_generation():
+    """Contre-épreuve : la garde ne bloque pas tout. Sans elle, le test
+    précédent passerait pour une bonne raison — parce que rien ne débloque
+    jamais — et ne prouverait rien."""
+    from audit_bim.reporting.avp.pack import _qa_missing_quantities
+    from audit_bim.reporting.avp_snapshot import count_menuiseries_with_dimensions
+
+    snap = _snapshot_fenetre_sans_native()
+    merge_into_snapshot(snap, _contrat_menuiserie({"W1": (1.2, 2.1)}))  # ifcopenshell_geometry
+
+    assert count_menuiseries_with_dimensions(snap) == 1
+    assert _qa_missing_quantities(snap) == []
+
+
+def test_la_disponibilite_nannonce_pas_partial_computed_sur_du_bbox():
+    """Même règle côté annonce : promettre un livrable « partiel » alors
+    qu'aucune valeur n'atteindra une cellule, c'est promettre du vide."""
+    from audit_bim.reporting.avp_availability import inspect_avp_report_availability
+
+    snap = _snapshot_fenetre_sans_native()
+    merge_into_snapshot(snap, _contrat_bbox({"W1": (1.519, 2.3)}))
+    men = {a.key: a for a in inspect_avp_report_availability(snap)}["menuiseries"]
+    assert men.computed_assisted is False
+    assert men.status != "partial_computed"
+    assert any("Width" in m or "Height" in m or "argeur" in m for m in men.missing_data), (
+        f"le manque doit être nommé : {men.missing_data}"
+    )
+
+
+def _snapshot_deux_fenetres(native_sur_w1: bool) -> ModelSnapshot:
+    """W1 porte ses dimensions natives, W2 n'a rien — seule la fusion la dote."""
+    w1 = {"uuid": "W1", "type": "IfcWindow", "name": "F25", "property_sets": []}
+    if native_sur_w1:
+        w1["property_sets"] = [
+            {
+                "name": "BaseQuantities",
+                "properties": [
+                    {"definition": {"name": "Width"}, "value": 1.2},
+                    {"definition": {"name": "Height"}, "value": 2.1},
+                ],
+            }
+        ]
+    w2 = {"uuid": "W2", "type": "IfcWindow", "name": "F30", "property_sets": []}
+    return ModelSnapshot(project={"name": "P"}, model={"name": "M.ifc"}, elements=[w1, w2]).index()
+
+
+def test_un_modele_mixte_nannonce_pas_partial_computed_pour_du_bbox():
+    """Cas où la garde de ``_uses_computed_quantity`` se joue vraiment.
+
+    L'exigence est satisfaite par les fenêtres NATIVES ; la question devient
+    « le calcul a-t-il apporté quelque chose ? ». Répondre oui sur des valeurs
+    bbox annoncerait un déblocage qui n'atteint aucune cellule.
+    """
+    from audit_bim.reporting.avp_availability import inspect_avp_report_availability
+
+    snap = _snapshot_deux_fenetres(native_sur_w1=True)
+    merge_into_snapshot(snap, _contrat_bbox({"W2": (1.519, 2.3)}))
+    men = {a.key: a for a in inspect_avp_report_availability(snap)}["menuiseries"]
+    assert men.can_generate is True, "les fenêtres natives restent générables"
+    assert men.computed_assisted is False, "des valeurs bbox ont été comptées comme un apport"
+    assert men.status != "partial_computed"
+
+
+def test_un_modele_mixte_annonce_partial_computed_pour_une_methode_comparable():
+    """Contre-épreuve du précédent : avec une méthode comparable, l'apport du
+    calcul doit bien être annoncé — sinon la garde masquerait tout apport."""
+    from audit_bim.reporting.avp_availability import inspect_avp_report_availability
+
+    snap = _snapshot_deux_fenetres(native_sur_w1=True)
+    merge_into_snapshot(snap, _contrat_menuiserie({"W2": (1.4, 2.2)}))
+    men = {a.key: a for a in inspect_avp_report_availability(snap)}["menuiseries"]
+    assert men.computed_assisted is True
+    assert men.status == "partial_computed"
