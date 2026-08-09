@@ -75,7 +75,9 @@ def _dalle(
         ],
     }
     if calculee:
-        el["computed_base_quantities"] = [{"quantity": "NetArea", "value": aire}]
+        el["computed_base_quantities"] = [
+            {"quantity": "NetArea", "value": aire, "method": "ifcopenshell_geometry"}
+        ]
     return el
 
 

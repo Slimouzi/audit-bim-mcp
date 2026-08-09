@@ -78,7 +78,7 @@ def _contrat(quantites: dict[str, float]) -> dict:
                 "quantity": "NetFloorArea",
                 "value": valeur,
                 "unit": "m2",
-                "method": "geometry",
+                "method": "ifcopenshell_geometry",
                 "status": "computed",
                 "source": "computed_ifcopenshell",
             }
@@ -240,7 +240,7 @@ def _contrat_menuiserie(mesures: dict[str, tuple[float, float]]) -> dict:
                 "quantity": nom,
                 "value": valeur,
                 "unit": "m",
-                "method": "geometry",
+                "method": "ifcopenshell_geometry",
                 "status": "computed",
                 "source": "computed_ifcopenshell",
             }
@@ -294,3 +294,70 @@ def test_deux_fenetres_aux_calculs_differents_ne_fusionnent_pas():
         f"les calculs distincts doivent rester distincts : {calculees}"
     )
     assert [r[6] for r in table.rows] == [1, 1], "chaque ligne ne compte qu'un élément"
+
+
+# ── La méthode de calcul filtre la comparaison ─────────────────────────────
+
+
+def _contrat_bbox(mesures: dict[str, tuple[float, float]]) -> dict:
+    doc = _contrat_menuiserie(mesures)
+    for q in doc["quantities"]:
+        q["method"] = "ifcopenshell_bbox"
+    return doc
+
+
+def test_une_dimension_bbox_nalimente_aucune_colonne_de_comparaison():
+    """``ifcopenshell_bbox`` mesure l'ENCOMBREMENT, pas la largeur nominale.
+
+    Mesuré sur la maquette réelle : natif 1,4 contre calculé 1,519, jusqu'à
+    +83 % d'écart, là où les espaces (``ifcopenshell_geometry``) restent sous
+    1,3 % et les dalles à 0 %. Afficher cet écart produirait une colonne qui
+    ressemble à un contrôle vérifié sans en être un — mieux vaut un blanc
+    expliqué qu'un écart faux.
+    """
+    table = _table_menuiseries(
+        [_fenetre("W1", "Fenêtre 200", largeur=1.4, hauteur=2.0)],
+        _contrat_bbox({"W1": (1.519, 2.3)}),
+    )
+    ligne = table.rows[0]
+    assert (ligne[3], ligne[4]) == (1.4, 2.0), "la native doit rester affichée"
+    assert (ligne[7], ligne[8], ligne[9]) == (None, None, None), (
+        f"des valeurs bbox ont alimenté les colonnes de comparaison : {ligne[7:10]}"
+    )
+
+
+def test_la_note_dit_pourquoi_les_colonnes_de_comparaison_sont_vides():
+    """Un blanc muet se lit comme « aucun calcul disponible ». Ici le calcul
+    existe : il a été écarté."""
+    from audit_bim.reporting.avp_snapshot import build_menuiseries_from_snapshot
+
+    snap = ModelSnapshot(
+        project={"name": "P"},
+        model={"name": "M.ifc"},
+        elements=[_fenetre("W1", "Fenêtre 200", largeur=1.4, hauteur=2.0)],
+    ).index()
+    merge_into_snapshot(snap, _contrat_bbox({"W1": (1.519, 2.3)}))
+    src, _total = build_menuiseries_from_snapshot(snap)
+
+    texte = " ".join(src.notes)
+    assert "NON comparables" in texte
+    assert "boîte" in texte and "englobante" in texte
+    assert "ifcopenshell_bbox" in texte
+
+
+def test_une_methode_comparable_alimente_bien_la_comparaison():
+    """Contre-épreuve : la garde ne doit pas vider toutes les comparaisons.
+    Les espaces et les dalles restent mesurés par ``ifcopenshell_geometry``."""
+    snap = _snapshot([_espace("SP1", "CHAMBRE", 100.0)])
+    merge_into_snapshot(snap, _contrat({"SP1": 110.0}))
+    assert _colonnes(snap)["CHAMBRE"] == (100.0, 110.0)
+
+
+def test_une_methode_inconnue_nest_pas_comparable_par_defaut():
+    """Liste blanche assumée : un producteur futur qui n'annonce pas sa méthode
+    ne doit pas se retrouver comparé par accident."""
+    snap = _snapshot([_espace("SP1", "CHAMBRE", 100.0)])
+    doc = _contrat({"SP1": 110.0})
+    doc["quantities"][0]["method"] = "methode_future_inconnue"
+    merge_into_snapshot(snap, doc)
+    assert _colonnes(snap)["CHAMBRE"] == (100.0, None)

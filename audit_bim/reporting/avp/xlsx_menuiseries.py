@@ -36,6 +36,11 @@ def _build_menuiseries_xlsx(path, sources, meta) -> Path:
     rows.append(summary)
     end = _write_moa_grid(ws, fmts, rows, start_row=0)
     if _rows_have_computed(table.rows, headers=table.headers):
-        write_safe(ws, end + 1, 0, _COMPUTED_METHODO_NOTE, fmts["note"])
+        end += 1
+        write_safe(ws, end, 0, _COMPUTED_METHODO_NOTE, fmts["note"])
+    # Le gabarit n'a qu'un onglet : une note de méthode s'écrit SOUS la table.
+    for note in (src.notes if src else []) or []:
+        end += 1
+        write_safe(ws, end + 1, 0, note, fmts["note"])
     wb.close()
     return path

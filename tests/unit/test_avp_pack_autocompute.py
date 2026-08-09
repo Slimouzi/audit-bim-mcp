@@ -84,7 +84,7 @@ def _q(gid, cls, qto, name, value):
         "quantity": name,
         "value": value,
         "unit": "m2" if "Area" in name else "m",
-        "method": "geometry",
+        "method": "ifcopenshell_geometry",
         "status": "computed",
         "source": "computed_ifcopenshell",
     }

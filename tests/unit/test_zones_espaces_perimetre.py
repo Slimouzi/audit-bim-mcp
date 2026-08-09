@@ -68,7 +68,9 @@ def _space(uuid: str, longname: str, area: float, *, computed: bool = False) -> 
         ],
     }
     if computed:
-        el["computed_base_quantities"] = [{"quantity": "NetFloorArea", "value": area}]
+        el["computed_base_quantities"] = [
+            {"quantity": "NetFloorArea", "value": area, "method": "ifcopenshell_geometry"}
+        ]
     return el
 
 
@@ -455,7 +457,7 @@ def test_une_valeur_de_comparaison_remplit_les_deux_colonnes_et_rend_lecart_expl
                     "quantity": "NetFloorArea",
                     "value": 12.6,  # natif 12,0 → écart +5 %
                     "unit": "m2",
-                    "method": "geometry",
+                    "method": "ifcopenshell_geometry",
                     "status": "computed",
                     "source": "computed_ifcopenshell",
                 }

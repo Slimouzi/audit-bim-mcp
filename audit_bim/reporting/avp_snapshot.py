@@ -661,24 +661,43 @@ def _computed_qty_names(el: dict) -> set[str]:
     }
 
 
-def _comparison_quantity(el: dict, qty_names: tuple[str, ...]) -> float | None:
-    """Valeur **calculée par IFC OpenShell**, dans l'ordre de ``qty_names``.
+#: Méthodes de calcul dont la valeur est **comparable** à une BaseQuantity
+#: native. Liste blanche assumée : une méthode inconnue n'est PAS comparable.
+#:
+#: ``ifcopenshell_geometry`` mesure la grandeur elle-même — surface d'espace,
+#: aire de dalle. Écarts constatés sur la maquette de recette : ≤ 1,3 % pour les
+#: espaces, 0 % pour les dalles.
+#:
+#: ``ifcopenshell_bbox`` mesure une **boîte englobante**. Confrontée à la largeur
+#: NOMINALE d'une menuiserie, elle donne 1,519 contre 1,4 — jusqu'à +83 % d'écart
+#: sur la maquette réelle. Ce n'est pas un défaut de maquette : ce sont deux
+#: grandeurs différentes. Afficher cet écart produirait exactement ce que la
+#: doctrine interdit — une colonne qui ressemble à un contrôle vérifié.
+_METHODES_COMPARABLES = ("ifcopenshell_geometry",)
+
+
+def _methode_comparable(methode: str | None) -> bool:
+    return (methode or "") in _METHODES_COMPARABLES
+
+
+def _comparison_quantity(el: dict, qty_names: tuple[str, ...]) -> tuple[float | None, str | None]:
+    """Valeur **calculée** et sa **méthode**, dans l'ordre de ``qty_names``.
 
     Lue sur ``computed_comparison_quantities``, qui conserve le calcul qu'il ait
-    été fusionné ou écarté. C'est cette valeur qui alimente les colonnes
-    « … IFC OpenShell » des livrables : la native vit dans les BaseQuantities,
-    la calculée ici, et les deux peuvent enfin coexister sur une même ligne.
+    été fusionné ou écarté. La méthode remonte avec la valeur : sans elle, le
+    reporting ne peut pas distinguer une mesure de la grandeur d'une mesure de
+    sa boîte englobante, et affiche les deux comme si elles étaient comparables.
     """
     par_nom = {
-        c.get("quantity"): _num(c.get("value"))
+        c.get("quantity"): (_num(c.get("value")), c.get("method"))
         for c in (el.get("computed_comparison_quantities") or [])
         if c.get("quantity")
     }
     for nom in qty_names:
-        valeur = par_nom.get(nom)
+        valeur, methode = par_nom.get(nom, (None, None))
         if valeur is not None:
-            return valeur
-    return None
+            return valeur, methode
+    return None, None
 
 
 def _mesures_natif_et_calcule(
@@ -694,13 +713,47 @@ def _mesures_natif_et_calcule(
     - calcul seul (*gap-fill*) → la valeur est dans le pset mais elle est
       calculée : elle va en colonne IFC OpenShell, la native reste vide ;
     - aucune des deux → les deux colonnes vides.
+
+    **La méthode filtre.** Une valeur dont la méthode n'est pas comparable à une
+    BaseQuantity native (cf. :data:`_METHODES_COMPARABLES`) n'entre dans aucune
+    colonne : ni en calculée, où elle produirait un écart faux, ni en native,
+    où elle passerait pour une donnée de maquette. Mieux vaut un blanc expliqué
+    qu'un écart faux — c'est à l'appelant d'écrire la note qui l'explique.
     """
-    calcule = _comparison_quantity(el, qty_names)
-    fusionnee = bool(_computed_qty_names(el) & set(qty_names))
-    if fusionnee:
-        # ``valeur`` vient du pset, donc du calcul : ne pas la compter en natif.
-        return None, (calcule if calcule is not None else valeur)
-    return valeur, calcule
+    calcule, methode = _comparison_quantity(el, qty_names)
+    if calcule is not None and not _methode_comparable(methode):
+        calcule = None
+    if not _computed_qty_names(el) & set(qty_names):
+        return valeur, calcule
+    # *Gap-fill* : ``valeur`` vient du pset, donc du calcul — jamais du natif.
+    # Sans entrée de comparaison, c'est ELLE la valeur calculée, et sa méthode
+    # vit dans la trace de fusion.
+    if calcule is not None:
+        return None, calcule
+    methode_fusionnee = next(
+        (
+            c.get("method")
+            for c in (el.get("computed_base_quantities") or [])
+            if c.get("quantity") in qty_names
+        ),
+        None,
+    )
+    return None, (valeur if _methode_comparable(methode_fusionnee) else None)
+
+
+def _methodes_non_comparables(el: dict, qty_names: tuple[str, ...]) -> set[str]:
+    """Méthodes écartées pour cet élément — de quoi écrire la note de méthode.
+
+    Écarter une valeur sans le dire ferait lire une colonne vide comme une
+    absence de calcul, alors que le calcul existe et a été jugé non comparable.
+    """
+    return {
+        c.get("method") or "inconnue"
+        for c in (el.get("computed_comparison_quantities") or [])
+        if c.get("quantity") in qty_names
+        and c.get("value") is not None
+        and not _methode_comparable(c.get("method"))
+    }
 
 
 def _quantity_source(el: dict, has_value: bool, qty_names: tuple[str, ...]) -> str:
@@ -1116,11 +1169,15 @@ def build_menuiseries_from_snapshot(
     groups: dict[tuple[Any, ...], dict[str, Any]] = {}
     total = 0.0
     any_area = False
+    methodes_ecartees: set[str] = set()
     for item in items:
         w = _rich(snap, item)
         width = _base_quantity_ordered(w, _LARGEUR_QTY)
         height = _base_quantity_ordered(w, _HAUTEUR_QTY)
         ot = _object_type_or_name(w)
+        methodes_ecartees |= _methodes_non_comparables(
+            w, (*_LARGEUR_QTY, *_HAUTEUR_QTY, *_WINDOW_BQ_AREA)
+        )
         # Chaque dimension est répartie entre sa colonne native et sa colonne
         # calculée. Les deux coexistent dès que le calcul IFC OpenShell existe :
         # c'est ce qui rend l'écart D/H réellement comparable.
@@ -1204,10 +1261,25 @@ def build_menuiseries_from_snapshot(
             ]
         )
     table = SheetTable(title="Menuiseries", headers=headers, rows=rows)
+    notes: list[str] = []
+    if methodes_ecartees:
+        # Une colonne vide se lit comme « aucun calcul disponible ». Ici le
+        # calcul existe : il a été écarté parce qu'il ne mesure pas la même
+        # grandeur. Le dire vaut mieux qu'un écart faux, et mieux qu'un blanc
+        # muet.
+        notes.append(
+            "Dimensions calculées disponibles mais NON comparables aux "
+            "BaseQuantities nominales : elles proviennent d'une boîte "
+            f"englobante ({', '.join(sorted(methodes_ecartees))}), qui mesure "
+            "l'encombrement de la menuiserie et non sa largeur ou sa hauteur "
+            "nominale. Les colonnes « … IFC OpenShell » et les écarts restent "
+            "donc vides pour ces éléments."
+        )
     src = MenuiseriesSource(
         table=table,
         sheet_title="TDB 2022 05.1 - Fenêtres Ok",
         nombre_types=(len(groups) or None),
+        notes=notes,
     )
     return src, (round(total, 4) if any_area else None)
 

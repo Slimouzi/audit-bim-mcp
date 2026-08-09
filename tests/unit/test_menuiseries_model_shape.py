@@ -293,7 +293,10 @@ def test_a_mixed_group_is_split_by_provenance():
             "type": "IfcWindow",
             "ObjectType": "Fenêtre 25",
             "property_sets": bq(Width=1.2, Height=1.0),
-            "computed_base_quantities": [{"quantity": "Width"}, {"quantity": "Height"}],
+            "computed_base_quantities": [
+                {"quantity": "Width", "method": "ifcopenshell_geometry"},
+                {"quantity": "Height", "method": "ifcopenshell_geometry"},
+            ],
         },
     ]
     src, _ = build_menuiseries_from_snapshot(ModelSnapshot(elements=identiques).index())
