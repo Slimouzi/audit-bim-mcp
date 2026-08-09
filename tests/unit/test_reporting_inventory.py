@@ -34,17 +34,17 @@ def test_the_document_figures_match_the_measurement(report):
         lines[m["kind"]] += m["lines"]
 
     assert len(report["modules"]) == 23
-    assert sum(m["lines"] for m in report["modules"]) == 8590
+    assert sum(m["lines"] for m in report["modules"]) == 8727
     assert counts["façade"] == 0
-    assert counts["orchestration_i3f"] == 12 and lines["orchestration_i3f"] == 6108
-    assert counts["lié_livrable_i3f"] == 9 and lines["lié_livrable_i3f"] == 2475
+    assert counts["orchestration_i3f"] == 12 and lines["orchestration_i3f"] == 6117
+    assert counts["lié_livrable_i3f"] == 9 and lines["lié_livrable_i3f"] == 2603
     assert counts["sans_attache_directe"] == 2 and lines["sans_attache_directe"] == 7
 
     text = DOC.read_text(encoding="utf-8")
     for claim in (
-        "**8 590 lignes**",
+        "**8 727 lignes**",
         "| Façade pure vers `bim-reporting` | 0 | — |",
-        "| Lié au livrable I3F par ses appelants | 9 | 2 475 |",
+        "| Lié au livrable I3F par ses appelants | 9 | 2 603 |",
     ):
         assert claim in text, f"le document ne porte plus : {claim}"
 
@@ -116,7 +116,7 @@ def test_avp_snapshot_is_classified_by_use_not_only_by_imports(report):
     entry = next(m for m in report["modules"] if m["module"] == "avp_snapshot.py")
 
     assert entry["attaches"] == [] and entry["client_terms"] == []
-    assert entry["lines"] == 1304
+    assert entry["lines"] == 1432
     assert len(entry["consumers"]) == 6
     assert entry["deliverable_bound"] is True
     assert entry["kind"] == "lié_livrable_i3f", "le script doit porter la nuance lui-même"

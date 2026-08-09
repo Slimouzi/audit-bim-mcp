@@ -364,16 +364,25 @@ REPORT_SPECS: tuple[ReportSpec, ...] = (
         label="export plancher",
         deliverable_key="plancher",
         example_filename="260203 Tatare 0546L AVP - export plancher.xlsx",
-        expected_sheets=("TDB 2022 xx.2 - Dalles Ok", "Planchers"),
+        expected_sheets=("TDB 2022 xx.2 - Dalles Ok", "Planchers", "Note de méthode"),
         headers=(
             "Composant",
             "Type",
             "Étage",
             "BaseQuantities.NetArea",
             "Surface IFC OpenShell",
+            "Ecart BaseQuantities / IFC OpenShell",
             "Nombre",
+            "Couleur",
         ),
-        critical_formulas=('IF(En-Dn=0,"",En/Dn-1)', "SUM(D2:D21)", "E22/D22-1"),
+        # Le gabarit MOA porte en outre un total « Surface de plancher »
+        # (``SUM(D2:D21)`` / ``E22/D22-1``) calculé sur une SÉLECTION de types de
+        # dalles — 19 des 49 groupes. Cette sélection est un arbitrage métier
+        # qu'aucune donnée de la maquette ne porte : nous ne produisons pas ce
+        # total (la note de méthode du livrable le dit), donc nous ne le
+        # déclarons pas. Annoncer une formule qu'on choisit de ne jamais écrire
+        # est exactement le décalage que ce catalogue doit éviter.
+        critical_formulas=('IF(OR(Dn="",En=""),"",IF(En-Dn=0,"",En/Dn-1))',),
         requirements=(
             DataRequirement("IfcSlab", "Dalles / planchers (IfcSlab)", "ifc_entity", _SLAB_CLASSES),
             DataRequirement(

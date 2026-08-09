@@ -34,7 +34,7 @@ from audit_bim.reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
 #: Fenêtres ne doit pas dépendre des 15 types du gabarit — mais la laisser
 #: implicite en est un autre. Cet ensemble est asservi par un test : il ne peut
 #: pas grandir sans faire échouer la suite.
-_FORMULES_ENCORE_CELLES_DU_GABARIT = {"surface_enveloppe", "menuiseries", "plancher"}
+_FORMULES_ENCORE_CELLES_DU_GABARIT = {"surface_enveloppe", "menuiseries"}
 
 
 def _snapshot() -> ModelSnapshot:
