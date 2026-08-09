@@ -35,7 +35,7 @@ def _build_menuiseries_xlsx(path, sources, meta) -> Path:
         summary[2] = f"=COUNTA(D2:D{last})" if table.rows else (src.nombre_types if src else None)
     rows.append(summary)
     end = _write_moa_grid(ws, fmts, rows, start_row=0)
-    if _rows_have_computed(table.rows):
+    if _rows_have_computed(table.rows, headers=table.headers):
         write_safe(ws, end + 1, 0, _COMPUTED_METHODO_NOTE, fmts["note"])
     wb.close()
     return path

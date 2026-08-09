@@ -16,9 +16,11 @@ from ..word_report import NOT_AVAILABLE
 # quantités calculées : distingue le natif BIMData du calcul IfcOpenShell.
 _COMPUTED_METHODO_NOTE = (
     "Quantités partiellement calculées par analyse géométrique IfcOpenShell "
-    "(colonne « Source quantité » = « Calculée (IfcOpenShell) ») — valeurs NON "
-    "contractuelles, en attente d'un ré-export maquette avec BaseQuantities natives. "
-    "Les quantités « Maquette » proviennent des BaseQuantities BIMData."
+    "(colonnes « … IFC OpenShell ») — valeurs NON contractuelles, en attente "
+    "d'un ré-export maquette avec BaseQuantities natives. Les colonnes "
+    "« … (Qté de Base) » portent les BaseQuantities natives BIMData. Une "
+    "quantité est native OU calculée : une seule des deux colonnes est "
+    "renseignée par ligne."
 )
 
 # Convention de nommage documentaire I3F, **générée à partir de données

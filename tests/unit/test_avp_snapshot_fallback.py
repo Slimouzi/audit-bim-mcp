@@ -302,7 +302,9 @@ def test_generated_snapshot_reports_replace_solibri_columns(tmp_path):
     )
     txt = _all_text(pack.shab_xlsx)
     assert "Surface IFC OpenShell" in txt
-    assert "Source quantité" in txt
+    # La provenance se lit à l'emplacement de la valeur, plus dans une colonne
+    # « Source quantité » ajoutée au tableau client (doctrine #210).
+    assert "Source quantité" not in txt
     assert "Surface Solibri" not in txt
     assert "9999" not in txt
 

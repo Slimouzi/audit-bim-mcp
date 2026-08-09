@@ -362,6 +362,28 @@ def _storey_label(storey: dict) -> str:
     return _label(storey) or _attr(storey, "Name")
 
 
+#: ``structure_tree`` désigne la nature d'un nœud tantôt par la **classe IFC**
+#: (``IfcBuildingStorey``), tantôt par un **libellé court** (``storey``) — c'est
+#: cette seconde forme que renvoie l'API BIMData en réel. Ne reconnaître que la
+#: première rendait muets tous les replis par l'arbre : la colonne Étage sortait
+#: vide sur 316 espaces qui portaient pourtant tous leur étage. Les fixtures de
+#: test employaient la forme longue, donc rien ne le voyait.
+_NODE_KINDS = {
+    "ifcbuildingstorey": "storey",
+    "buildingstorey": "storey",
+    "storey": "storey",
+    "ifczone": "zone",
+    "zone": "zone",
+    "ifcspace": "space",
+    "space": "space",
+}
+
+
+def _node_kind(node: dict) -> str:
+    """Nature d'un nœud de ``structure_tree``, quelle que soit son écriture."""
+    return _NODE_KINDS.get(_norm(node.get("type")).replace(" ", ""), "")
+
+
 def _walk_structure_tree(snap: ModelSnapshot) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """Parcourt ``structure_tree`` (source hiérarchique BIMData) → mappings
     ``space_uuid → [étages]`` et ``space_uuid → [zones]`` (par conteneur
@@ -376,13 +398,13 @@ def _walk_structure_tree(snap: ModelSnapshot) -> tuple[dict[str, list[str]], dic
             m[u].append(name)
 
     def visit(node: dict, storey: str | None, zone: str | None) -> None:
-        ntype = node.get("type")
+        ntype = _node_kind(node)
         nname = node.get("name") or node.get("long_name")
-        if ntype == "IfcBuildingStorey":
+        if ntype == "storey":
             storey = nname or storey
-        elif ntype == "IfcZone":
+        elif ntype == "zone":
             zone = nname or zone
-        elif ntype == "IfcSpace" and node.get("uuid"):
+        elif ntype == "space" and node.get("uuid"):
             add(st_map, node.get("uuid"), storey)
             add(zn_map, node.get("uuid"), zone)
         for child in node.get("children") or []:
@@ -403,11 +425,11 @@ def _zone_members_from_tree(snap: ModelSnapshot) -> dict[str, list[str]]:
     out: dict[str, list[str]] = defaultdict(list)
 
     def visit(node: dict, zone_uuid: str | None) -> None:
-        ntype = node.get("type")
+        ntype = _node_kind(node)
         nuuid = node.get("uuid")
-        if ntype == "IfcZone":
+        if ntype == "zone":
             zone_uuid = nuuid or zone_uuid
-        elif ntype == "IfcSpace" and nuuid and zone_uuid and nuuid not in out[zone_uuid]:
+        elif ntype == "space" and nuuid and zone_uuid and nuuid not in out[zone_uuid]:
             out[zone_uuid].append(nuuid)
         for child in node.get("children") or []:
             visit(child, zone_uuid)
@@ -527,6 +549,58 @@ _MULTI_SEP = " / "
 _SRC_MODEL = "Maquette"
 _SRC_COMPUTED = "Calculée (IfcOpenShell)"
 
+#: Racines de libellés désignant une **annexe non habitable**, exclue du total
+#: SHAB. La règle vient de la **définition réglementaire de la surface
+#: habitable**, pas du classeur client : celui-ci sert à la *vérifier*, jamais à
+#: la produire. La déduire des libellés présents dans une maquette donnée ferait
+#: une règle vraie pour cette maquette et fausse pour la suivante.
+#:
+#: Les annexes restent **visibles** dans l'onglet de détail — elles existent
+#: dans la maquette — mais ne contribuent pas au total du pivot SHAB.
+_SHAB_EXCLUDED_SPACE_LABELS = (
+    "CELLIER",
+    "BALCON",
+    "TERRASSE",
+    "LOGGIA",
+    "CAVE",
+    "GARAGE",
+    "COMBLE",
+    "LOCAL TECHNIQUE",
+    "LOCAL VELO",
+    "PARKING",
+)
+_SHAB_EXCLUDED_NORM = tuple(_norm(lbl) for lbl in _SHAB_EXCLUDED_SPACE_LABELS)
+
+#: Libellé porté par la colonne « Type Pièce » d'une annexe. Le gabarit client
+#: distingue en outre « Balcons et terrasses » d'« ANNEXES », mais **aucune
+#: donnée de la maquette ne permet cette distinction** (mêmes libellés, mêmes
+#: attributs `InteriorOrExteriorSpace`) : elle relève d'un arbitrage humain.
+#: On ne la fabrique donc pas — sans effet sur le total, les deux étant exclues.
+_TYPE_PIECE_ANNEXE = "ANNEXES"
+
+#: Typologie de logement portée par l'``ObjectType`` de l'IfcZone
+#: (« Zone Logement T4 » → « T4 »). C'est de LÀ que vient la colonne « Type
+#: Pièce » du gabarit : l'IfcSpace, lui, ne porte aucun type métier — le lire
+#: sur l'espace ne pouvait donner que la classe IFC (« IfcSpace »).
+_TYPOLOGIE_RE = re.compile(r"\bT\s?\d+\b", re.IGNORECASE)
+
+
+def _est_annexe_shab(label: str) -> bool:
+    """Le libellé d'espace désigne-t-il une annexe exclue de la SHAB ?"""
+    norm = _norm(label)
+    if not norm:
+        return False
+    return any(
+        norm == racine or norm.startswith(racine + " ") or norm.startswith(racine + "-")
+        for racine in _SHAB_EXCLUDED_NORM
+    )
+
+
+def _typologie_zone(zone_type: str) -> str:
+    """« Zone Logement T4 » → « T4 » ; à défaut, le type de zone tel quel."""
+    found = _TYPOLOGIE_RE.search(zone_type or "")
+    return found.group(0).upper().replace(" ", "") if found else (zone_type or "").strip()
+
 
 def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
@@ -639,6 +713,9 @@ def _space_records(snap: ModelSnapshot) -> list[dict[str, Any]]:
             if direct:
                 storeys = [direct]
         has_zone = z is not None or bool(zone_name_override)
+        zone_type = _ifc_type(zrich) if zrich else ("IfcZone" if has_zone else "")
+        piece = _label(sp)
+        annexe = _est_annexe_shab(piece)
         records.append(
             {
                 "component": "Zone" if has_zone else "Pièce",
@@ -647,14 +724,23 @@ def _space_records(snap: ModelSnapshot) -> list[dict[str, Any]]:
                 else ("Pièce" if not has_zone else ""),
                 "zone_name": zone_name_override
                 or ((_label(zrich) or _attr(z or {}, "Name")) if z else ""),
-                "zone_type": _ifc_type(zrich) if zrich else ("IfcZone" if has_zone else ""),
-                "group": _attr(sp, "Name") or _label(sp),
-                "piece": _label(sp),
-                "piece_type": _ifc_type(sp),
+                "zone_type": zone_type,
+                "group": _attr(sp, "Name") or piece,
+                "piece": piece,
+                # Typologie du logement (via la zone), ou « ANNEXES ». Un espace
+                # sans zone n'a pas de typologie : ne rien écrire plutôt que de
+                # retomber sur la classe IFC, qui ne dit rien du métier.
+                "piece_type": _TYPE_PIECE_ANNEXE
+                if annexe
+                else (_typologie_zone(zone_type) if has_zone else ""),
                 "net": net,
                 "gross": gross,
                 "storey": _MULTI_SEP.join(storeys),
                 "source": _quantity_source(sp, net is not None, _SPACE_BQ_ORDER),
+                # Périmètre : « zoné » décide de la présence dans les onglets
+                # métier, « annexe » de la contribution au total SHAB.
+                "zoned": has_zone,
+                "annexe": annexe,
             }
         )
         seen.add(sp_uuid)
@@ -678,19 +764,81 @@ def _space_records(snap: ModelSnapshot) -> list[dict[str, Any]]:
     return records
 
 
+def _zonage_present(records: list[dict[str, Any]]) -> bool:
+    """La maquette porte-t-elle un zonage exploitable (au moins un espace
+    rattaché à une ``IfcZone``) ?"""
+    return any(r["zoned"] for r in records)
+
+
+def _records_detail(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Population des onglets métier : **espaces rattachés à une zone**.
+
+    Annexes comprises — elles existent dans la maquette et le gabarit les
+    montre — mais sans les espaces non zonés, qui n'ont ni zone ni typologie et
+    feraient raconter au détail une population différente de celle du pivot.
+
+    **Le filtre ne s'applique que si la maquette est zonée.** Sans aucune
+    ``IfcZone``, le retenir viderait le livrable : rien ne se mélange, il n'y a
+    rien à départager. Le régime appliqué est écrit dans la note de méthode —
+    un total qui ne repose pas sur un zonage ne se lit pas comme une SHAB par
+    logement.
+    """
+    if not _zonage_present(records):
+        return list(records)
+    return [r for r in records if r["zoned"]]
+
+
+def _records_shab(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Périmètre du **total SHAB** : la population du détail, hors annexes.
+
+    L'exclusion des annexes, elle, ne dépend pas du zonage : c'est une règle de
+    la définition de la surface habitable, pas une règle de regroupement.
+    """
+    return [r for r in _records_detail(records) if not r["annexe"]]
+
+
+def _records_hors_perimetre(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Espaces présents dans la maquette mais absents des onglets métier."""
+    if not _zonage_present(records):
+        return []
+    return [r for r in records if not r["zoned"]]
+
+
+def _somme_nette(records: list[dict[str, Any]]) -> float:
+    return sum((_num(r["net"]) or 0.0) for r in records)
+
+
 def _zone_detail_grid(
-    snap: ModelSnapshot, *, title: str, zones_variant: bool = False
+    records: list[dict[str, Any]], *, title: str, zones_variant: bool = False
 ) -> SheetGrid | None:
-    records = _space_records(snap)
-    if not records:
+    """Onglet de détail — **12 colonnes A:L**, la forme du gabarit client.
+
+    Deux règles de doctrine, les mêmes qu'au livrable Fenêtres (#210) :
+
+    - **jamais de valeur recopiée pour simuler une comparaison**. G et H
+      recevaient LITTÉRALEMENT la même variable ``net`` : l'écart L était donc
+      vide par construction et se lisait comme une concordance vérifiée alors
+      que rien ne l'avait été. Après la fusion *gap-only*, une quantité est soit
+      native, soit calculée — jamais les deux. On remplit donc **la colonne qui
+      correspond à la provenance**, et l'autre reste vide ;
+    - la provenance se lisant à l'emplacement de la valeur, la 13ᵉ colonne
+      ``Source quantité`` — absente du gabarit — n'a plus lieu d'être.
+
+    L'écart garde la **forme relative** du gabarit, mais gardé : sans les deux
+    valeurs, il n'y a pas d'écart à afficher (et ``H/G-1`` donnerait ``#DIV/0!``).
+    """
+    lignes = _records_detail(records)
+    if not lignes:
         return None
     headers = list(_ZONE_DETAIL_HEADERS_ZONES if zones_variant else _ZONE_DETAIL_HEADERS_SHAB)
-    headers.append("Source quantité")
     rows: list[list[Any]] = [list(headers)]
-    for rec in records:
+    for rec in lignes:
         excel_row = len(rows) + 1
         net = _round2(rec["net"])
         gross = _round2(rec["gross"])
+        calculee = rec["source"] == _SRC_COMPUTED
+        openshell = net if calculee else None
+        natif = None if calculee else net
         rows.append(
             [
                 rec["first_component"],
@@ -699,38 +847,31 @@ def _zone_detail_grid(
                 rec["group"],
                 rec["piece"],
                 rec["piece_type"],
-                net,
-                net,
+                openshell,
+                natif,
                 rec["storey"],
                 gross,
                 "",
-                f'=IF(G{excel_row}-H{excel_row}=0,"",G{excel_row}-H{excel_row})',
-                rec["source"],
+                f'=IF(OR(G{excel_row}="",H{excel_row}=""),"",'
+                f'IF(H{excel_row}/G{excel_row}-1=0,"",H{excel_row}/G{excel_row}-1))',
             ]
         )
     if not zones_variant:
-        rows.append(["", "", "", "", "", "", "", "", "", "", "", "", ""])
+        rows.append([""] * len(headers))
         rows.append(
-            [
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                f"=SUBTOTAL(9,L2:L{len(records) + 1})",
-                "",
-            ]
+            [*[""] * 11, f"=SUBTOTAL(9,L2:L{len(lignes) + 1})"],
         )
     return SheetGrid(title=title, rows=rows)
 
 
 def _pivot_grid(records: list[dict[str, Any]], *, title: str, first_label: str) -> SheetGrid | None:
+    """Pivot de synthèse — attend des enregistrements **déjà réduits au
+    périmètre SHAB** (cf. :func:`_records_shab`).
+
+    Ce pivot ne filtre rien lui-même : il totalise ce qu'on lui donne. C'est
+    pourquoi il recevait tout — annexes et espaces non zonés compris — et
+    annonçait un total juste arithmétiquement mais faux pour l'usage I3F.
+    """
     if not records:
         return None
     piece_order: list[str] = []
@@ -782,34 +923,95 @@ def _pivot_grid(records: list[dict[str, Any]], *, title: str, first_label: str) 
     return SheetGrid(title="Feuil1" if title.startswith("SHAB") else "Feuil2", rows=rows)
 
 
+def _note_methode_rows(records: list[dict[str, Any]]) -> list[list[Any]]:
+    """Trace de ce que les onglets métier ont filtré.
+
+    Règle générale : **un livrable client peut filtrer, mais il doit tracer ce
+    qu'il filtre quand la donnée existe dans la maquette.** Écarter 191,5 m²
+    sans le dire est propre visuellement et faux opérationnellement — le maître
+    d'ouvrage doit voir ce qui est hors périmètre du document qu'il lit.
+    """
+    hors = _records_hors_perimetre(records)
+    annexes = [r for r in _records_detail(records) if r["annexe"]]
+    zonage = _zonage_present(records)
+    entete: list[list[Any]] = [
+        ["Note de méthode"],
+        [],
+        ["zonage_present", "oui" if zonage else "non"],
+    ]
+    if not zonage:
+        # Sans zonage, le total n'est pas une SHAB par logement : le dire ici
+        # plutôt que de laisser lire un chiffre pour ce qu'il n'est pas.
+        entete.append(
+            [
+                "Aucune IfcZone dans la maquette : le livrable liste tous les "
+                "espaces et le total ne peut pas être ventilé par logement."
+            ]
+        )
+    return [
+        *entete,
+        [],
+        [
+            "Espaces présents dans la maquette mais exclus du livrable "
+            "Zones/Espaces car non rattachés à une zone."
+        ],
+        ["espaces_non_zones_count", len(hors)],
+        ["espaces_non_zones_surface_m2", _round2(_somme_nette(hors))],
+        [],
+        [
+            "Les espaces dont le libellé correspond à une annexe non habitable "
+            "sont exclus du total SHAB selon la règle documentaire SHAB. Ils "
+            "restent traçables dans le rapport."
+        ],
+        ["annexes_count", len(annexes)],
+        ["annexes_surface_m2", _round2(_somme_nette(annexes))],
+        ["annexes_libelles", _MULTI_SEP.join(sorted({r["piece"] for r in annexes}))],
+        [],
+        ["total_shab_m2", _round2(_somme_nette(_records_shab(records)))],
+    ]
+
+
 def build_shab_from_snapshot(snap: ModelSnapshot) -> tuple[MultiSheetSource | None, float | None]:
-    """Export SHAB MOA depuis la maquette : pivot + détail espaces."""
+    """Export SHAB MOA depuis la maquette : pivot + détail espaces.
+
+    Le total renvoyé est celui du **périmètre SHAB** (espaces zonés, hors
+    annexes) : c'est lui qui alimente le ratio FAC/SHAB, et un ratio dont le
+    dénominateur ne serait pas le total affiché par le pivot ferait dire deux
+    chiffres différents au même document.
+    """
     records = _space_records(snap)
     if not records:
         return None, None
-    pivot = _pivot_grid(records, title="SHAB (Qté de Base)", first_label="Logement")
-    detail = _zone_detail_grid(snap, title="TDB 2022 01.3 - Export Zones...")
-    grids = [g for g in (pivot, detail) if g is not None]
-    total = round(sum((_num(rec["net"]) or 0.0) for rec in records), 4)
+    pivot = _pivot_grid(_records_shab(records), title="SHAB (Qté de Base)", first_label="Logement")
+    detail = _zone_detail_grid(records, title="TDB 2022 01.3 - Export Zones...")
+    note = SheetGrid(title="Note de méthode", rows=_note_methode_rows(records))
+    grids = [g for g in (pivot, detail, note) if g is not None]
+    total = round(_somme_nette(_records_shab(records)), 4)
     return MultiSheetSource(grids=grids), total
 
 
 def build_zones_espaces_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None:
-    """Export Zones/Espaces MOA depuis la maquette : pivot + détail + Feuil1."""
+    """Export Zones/Espaces MOA depuis la maquette : pivot + détail + Feuil1.
+
+    ``Feuil2`` (pivot) et l'onglet de détail restent au périmètre du gabarit —
+    espaces zonés uniquement ; ``Feuil1``, jusqu'ici vide, porte la note de
+    méthode et le décompte de ce qui a été écarté.
+    """
     records = _space_records(snap)
     if not records:
         return None
     pivot = _pivot_grid(
-        records,
+        _records_shab(records),
         title="Somme de Surface Nette (Qté de Base)",
         first_label="Étiquettes de lignes",
     )
     detail = _zone_detail_grid(
-        snap,
+        records,
         title="TDB 2022 01.3 - Export Zones...",
         zones_variant=True,
     )
-    grids = [g for g in (pivot, detail, SheetGrid(title="Feuil1", rows=[])) if g is not None]
+    note = SheetGrid(title="Feuil1", rows=_note_methode_rows(records))
+    grids = [g for g in (pivot, detail, note) if g is not None]
     return MultiSheetSource(grids=grids) if grids else None
 
 

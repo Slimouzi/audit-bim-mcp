@@ -26,9 +26,50 @@ from .models import _COMPUTED_METHODO_NOTE, _QA_SCAFFOLD
 patch_openpyxl()
 
 
-def _rows_have_computed(rows) -> bool:
-    """Vrai si une table contient au moins une valeur « Calculée (IfcOpenShell) »."""
-    return any(c == _SRC_COMPUTED for r in (rows or []) for c in (r or []))
+#: Motif des en-têtes de colonnes portant une quantité **calculée**.
+_COL_OPENSHELL_TOKEN = "IFC OpenShell"
+#: En-tête de l'ancien mécanisme de traçabilité (provenance écrite en toutes
+#: lettres en bout de ligne). Sa présence identifie une table **non migrée**.
+_COL_SOURCE_QUANTITE = "Source quantité"
+
+
+def _rows_have_computed(rows, headers=None) -> bool:
+    """Vrai si une table porte au moins une quantité calculée par IfcOpenShell.
+
+    Deux mécanismes de traçabilité coexistent, et la table dit lequel elle
+    emploie :
+
+    - **non migrée** — une colonne ``Source quantité`` porte la provenance en
+      toutes lettres. C'est encore le cas du livrable Plancher, dont les deux
+      colonnes de mesure reçoivent la même valeur : y lire un calcul dans la
+      colonne « IFC OpenShell » qualifierait de calculée une quantité native ;
+    - **migrée** (doctrine #210) — la provenance se lit à **l'emplacement de la
+      valeur**, une seule des deux colonnes étant renseignée. C'est le cas des
+      livrables Zones/Espaces, SHAB et Fenêtres.
+
+    Ne chercher que l'ancien libellé faisait disparaître la note « valeurs NON
+    contractuelles » des livrables migrés — sans erreur, la note étant
+    facultative.
+
+    ``headers`` est explicite car les deux porteurs diffèrent : ``SheetGrid``
+    inclut sa ligne d'en-tête dans ``rows``, ``SheetTable`` la garde à part.
+    """
+    rows = rows or []
+    entetes = [e if isinstance(e, str) else "" for e in (headers if headers is not None else [])]
+    donnees = rows
+    if headers is None:
+        entetes = [e if isinstance(e, str) else "" for e in (rows[0] if rows else [])]
+        donnees = rows[1:]
+
+    if any(e == _COL_SOURCE_QUANTITE for e in entetes):
+        return any(c == _SRC_COMPUTED for r in rows for c in (r or []))
+
+    colonnes = [i for i, entete in enumerate(entetes) if _COL_OPENSHELL_TOKEN in entete]
+    return any(
+        i < len(r or []) and isinstance(r[i], (int, float)) and not isinstance(r[i], bool)
+        for r in donnees
+        for i in colonnes
+    )
 
 
 def _count_business_rows(path: Path) -> int:
