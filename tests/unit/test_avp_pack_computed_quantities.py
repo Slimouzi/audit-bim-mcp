@@ -284,7 +284,15 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
 
 
 def test_native_quantities_are_never_overwritten(session, tmp_path):
-    """Une BaseQuantity native BIMData prime sur la valeur calculée."""
+    """Une BaseQuantity native BIMData prime sur la valeur calculée.
+
+    *Gap-only* décide quelle valeur fait **autorité**, pas laquelle mérite
+    d'être retenue : la native reste dans le pset et dans sa colonne, et la
+    calculée est désormais **conservée à côté** pour alimenter la colonne
+    « IFC OpenShell ». C'est ce qui rend la comparaison possible — jusqu'ici la
+    valeur calculée était jetée dès qu'une native existait, donc la colonne de
+    comparaison sortait vide sur toute maquette portant ses BaseQuantities.
+    """
     sess, _ = session
     # La quantité native vit dans les DONNÉES du snapshot (ce que renvoie
     # BIMData), pas dans l'index : ``index()`` recopie les espaces
@@ -304,9 +312,25 @@ def test_native_quantities_are_never_overwritten(session, tmp_path):
     assert res["computed_quantities_coverage"]["n_gap_kept"] == 1
 
     chemin = next(p for p in res["paths"] if _cle(p) == "shab_xlsx")
-    nombres = _nombres(chemin)
-    assert any(abs(n - 99.9) < 0.01 for n in nombres), "la valeur native doit être conservée"
-    assert not any(abs(n - 24.5) < 0.01 for n in nombres), "la calculée ne doit pas l'écraser"
+    wb = openpyxl.load_workbook(chemin)
+    ws = next(wb[t] for t in wb.sheetnames if t.startswith("TDB 2022 01.3"))
+    entetes = [c.value for c in ws[1]]
+    col_natif = entetes.index("Surface Nette (Qté de Base)") + 1
+    col_calc = entetes.index("Surface IFC OpenShell") + 1
+    valeurs = [
+        (ws.cell(r, col_natif).value, ws.cell(r, col_calc).value) for r in range(2, ws.max_row + 1)
+    ]
+    # La native reste à SA place, la calculée n'y entre pas.
+    assert any(n is not None and abs(n - 99.9) < 0.01 for n, _ in valeurs), (
+        "la valeur native doit être conservée dans la colonne native"
+    )
+    assert not any(n is not None and abs(n - 24.5) < 0.01 for n, _ in valeurs), (
+        "la calculée ne doit pas écraser la native"
+    )
+    # …et elle est visible en face, ce qui rend l'écart comparable.
+    assert any(c is not None and abs(c - 24.5) < 0.01 for _, c in valeurs), (
+        "la valeur calculée doit alimenter la colonne « Surface IFC OpenShell »"
+    )
 
 
 def test_unknown_schema_is_refused_before_generating(session, tmp_path):
