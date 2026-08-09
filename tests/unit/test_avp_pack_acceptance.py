@@ -122,7 +122,8 @@ def _annexes(pack) -> dict[str, Path]:
         "Zones/Espaces": pack.zones_espaces_xlsx,
         "Enveloppe": pack.enveloppe_xlsx,
         "Menuiseries": pack.menuiseries_xlsx,
-        "Plancher": pack.plancher_xlsx,
+        # Plancher n'est plus produit : bloqué par une règle métier absente.
+        **({"Plancher": pack.plancher_xlsx} if pack.plancher_xlsx is not None else {}),
     }
 
 
@@ -147,7 +148,10 @@ def test_xlsx_annexes_are_non_empty(tmp_path):
         export_pdf=False,
     )
     annexes = _annexes(pack)
-    assert len(annexes) == 6
+    # 5 annexes : Plancher n'est plus produit, faute de règle métier de
+    # sélection des groupes contribuant à la Surface de plancher.
+    assert len(annexes) == 5
+    assert "Plancher" not in annexes
     empty = {label: p.name for label, p in annexes.items() if _annex_rows(label, p) == 0}
     assert not empty, f"annexes vides: {empty}"
 

@@ -974,9 +974,18 @@ def _format_avp_pack_response(
     computed_trace: AvpContractTrace,
 ) -> dict:
     """Payload de succès du tool AVP, séparé de la QA gate."""
+    from ...reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
+
     return {
         "output_dir": str(out_dir),
         "paths": [str(p) for p in pack.paths()],
+        # Un pack peut écarter un rapport, mais il doit dire lequel et pourquoi :
+        # une annexe absente sans explication se lit comme un oubli.
+        "blocked_reports": {
+            cle: spec.blocked_reason
+            for cle, spec in REPORT_SPECS_BY_KEY.items()
+            if spec.blocked_reason is not None
+        },
         "analyse_docx": str(pack.analyse_docx),
         "analyse_pdf": str(pack.analyse_pdf) if pack.analyse_pdf else None,
         "pdf_available": pack.analyse_pdf is not None,
@@ -1035,6 +1044,7 @@ def generate_avp_i3f_pack(
     temoin_virtuel: str | None = None,
     date_controle: str | None = None,
     auteur_controle: str | None = None,
+    reports: list[str] | None = None,
     export_pdf: bool = True,
     confirm_context: bool = False,
 ) -> dict:
@@ -1138,6 +1148,12 @@ def generate_avp_i3f_pack(
             métadonnées opérationnelles du contrôle (issues du rapport I3F de
             référence) pour « Données d'entrée » / « Usages BIM 3F ». Absentes
             → « Information non disponible… ».
+        reports: clés catalogue des rapports demandés. ``None`` (défaut) =
+            tous ceux qui sont produisibles ; un rapport **bloqué par une règle
+            métier** en est alors simplement absent, et le motif est rendu dans
+            ``blocked_reports``. Nommer explicitement un rapport bloqué fait
+            **refuser la génération avant toute écriture** : le demander
+            nommément mérite un refus explicite, pas une omission silencieuse.
         export_pdf: tente la conversion .docx → .pdf (LibreOffice si présent).
         confirm_context: ``True`` pour générer malgré un **auteur du contrôle**
             manquant. Ne contourne **jamais** ce qui nomme les livrables —
@@ -1147,7 +1163,31 @@ def generate_avp_i3f_pack(
         ``{output_dir, paths, analyse_docx, analyse_pdf, pdf_available}`` ou
         ``{status: needs_context, missing, questions}``.
     """
+    from ...reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
     from ...reporting.avp_sources import AvpSourcePaths, load_sources, read_envelope_json
+
+    # Refus AVANT toute écriture : un rapport bloqué par une règle métier
+    # absente ne peut pas être produit, et le demander nommément doit le dire.
+    bloques = {
+        cle: spec.blocked_reason
+        for cle, spec in REPORT_SPECS_BY_KEY.items()
+        if spec.blocked_reason is not None
+    }
+    demandes_bloques = sorted(set(reports or []) & set(bloques))
+    if demandes_bloques:
+        return {
+            "status": "error",
+            "error": "report_blocked",
+            "blocked_reports": {c: bloques[c] for c in demandes_bloques},
+            "message": (
+                "Rapport(s) non produisibles : "
+                + ", ".join(f"{c} — {bloques[c]}" for c in demandes_bloques)
+            ),
+            "next_step": (
+                "Retirer ce(s) rapport(s) de ``reports``, ou définir la règle "
+                "métier manquante. Aucun fichier n'a été écrit."
+            ),
+        }
 
     context = _validate_avp_context(
         controle_xlsx=controle_xlsx,

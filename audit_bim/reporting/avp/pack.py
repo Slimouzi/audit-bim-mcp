@@ -15,6 +15,7 @@ from bim_reporting.pdf import docx_to_pdf
 
 from ...audit.engine import AuditResult
 from ...extraction.model_data import ModelSnapshot
+from ..avp_report_catalog import REPORT_SPECS_BY_KEY
 from ..avp_snapshot import (
     count_candidate_envelope_walls,
     count_menuiseries,
@@ -282,7 +283,14 @@ def write_avp_i3f_report_pack(
     zones = build_zones_xlsx(out / fn_zones, (sources.zones_espaces if sources else None), meta)
     enveloppe = _build_enveloppe_xlsx(out / fn_env, sources, meta)
     menuiseries = _build_menuiseries_xlsx(out / fn_men, sources, meta)
-    plancher = _build_plancher_xlsx(out / fn_plancher, sources, meta)
+    # Rapport bloqué par une règle métier absente → on n'écrit RIEN. Produire
+    # un classeur dont la synthèse ne peut pas être juste ferait un
+    # quasi-livrable, plus difficile à réfuter qu'un refus clair.
+    plancher = (
+        None
+        if REPORT_SPECS_BY_KEY["plancher"].blocked_reason is not None
+        else _build_plancher_xlsx(out / fn_plancher, sources, meta)
+    )
     analyse = _build_analyse_bim_avp_docx(
         out / fn_analyse, result, sources, meta, snap, controle_xlsx=controle
     )
@@ -375,7 +383,11 @@ def _qa_empty_deliverables(
         problems.append("Enveloppe")
     if count_menuiseries(snap) > 0 and _count_business_rows(pack.menuiseries_xlsx) == 0:
         problems.append("Menuiseries")
-    if count_planchers(snap) > 0 and _count_business_rows(pack.plancher_xlsx) == 0:
+    if (
+        pack.plancher_xlsx is not None
+        and count_planchers(snap) > 0
+        and _count_business_rows(pack.plancher_xlsx) == 0
+    ):
         problems.append("Plancher")
     return problems
 
@@ -429,6 +441,10 @@ def _qa_missing_quantities(snap) -> list[str]:
         problems += ["SHAB", "Zones/Espaces"]
     if count_menuiseries(snap) > 0 and count_menuiseries_with_dimensions(snap) == 0:
         problems.append("Menuiseries")
-    if count_planchers(snap) > 0 and count_planchers_with_area(snap) == 0:
+    if (
+        REPORT_SPECS_BY_KEY["plancher"].blocked_reason is None
+        and count_planchers(snap) > 0
+        and count_planchers_with_area(snap) == 0
+    ):
         problems.append("Plancher")
     return problems

@@ -13,7 +13,7 @@ from audit_bim.reporting.avp_report_catalog import (
     REPORT_SPECS,
     REPORT_SPECS_BY_KEY,
 )
-from audit_bim.reporting.avp_sources import AvpSources, MultiSheetSource, SheetGrid
+from audit_bim.reporting.avp_sources import AvpSources
 
 
 def _bq(name: str, value: float) -> dict:
@@ -108,7 +108,9 @@ def test_every_report_maps_to_a_deliverable_key():
 
 def test_snapshot_only_generates_business_but_never_identical_without_template_mode():
     avails = _by_key(inspect_avp_report_availability(_full_snapshot()))
-    for key in ("shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries", "plancher"):
+    # `plancher` est exclu : il est bloqué par une RÈGLE MÉTIER absente, pas
+    # par un manque de données — cf. test dédié plus bas.
+    for key in ("shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries"):
         av = avails[key]
         assert av.can_generate is True, key
         assert av.can_generate_identical is False, key
@@ -160,19 +162,38 @@ def test_no_snapshot_blocks_entity_reports():
 
 
 def test_source_present_generates_branded_not_identical():
-    # Une source XLS plancher chargée ne remplace pas les données IFC : le
-    # snapshot reste la source métier, et la génération brandée n'est pas
+    from audit_bim.reporting.avp_sources import MenuiseriesSource, SheetTable
+
+    # Une source XLS chargée ne remplace pas les données IFC : le snapshot
+    # reste la source métier, et la génération brandée n'est pas
     # « à l'identique ».
     sources = AvpSources(
-        plancher=MultiSheetSource(
-            grids=[SheetGrid(title="Planchers", rows=[["Composant"], ["IfcSlab", 50.0]])]
+        menuiseries=MenuiseriesSource(
+            table=SheetTable(title="Menuiseries", headers=["Composant"], rows=[["IfcWindow"]])
         )
     )
-    av = _by_key(inspect_avp_report_availability(_full_snapshot(), sources=sources))["plancher"]
+    av = _by_key(inspect_avp_report_availability(_full_snapshot(), sources=sources))["menuiseries"]
     assert av.can_generate is True
     assert av.can_generate_identical is False
     assert av.status == "partial"
     assert "template" in av.next_action.lower()
+
+
+def test_plancher_est_bloque_par_une_regle_metier_pas_par_les_donnees():
+    """La distinction porte l'action : on ne demande pas de compléter la
+    maquette, on demande un arbitrage.
+
+    Non-vacuité : les données sont TOUTES présentes (`available_data` non vide,
+    `missing_data` vide côté métier). Le blocage ne vient donc pas d'elles.
+    """
+    av = _by_key(inspect_avp_report_availability(_full_snapshot()))["plancher"]
+    assert av.can_generate is False
+    assert av.status == "blocked"
+    assert av.available_data, "un blocage métier ne doit pas masquer les données présentes"
+    assert "règle métier" in av.next_action
+    assert "19" in av.next_action and "49" in av.next_action
+    # Le motif ne parle PAS de données manquantes : ce serait une fausse piste.
+    assert "compléter la maquette" not in av.next_action
 
 
 def test_menuiseries_source_only_generates_without_snapshot():

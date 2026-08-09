@@ -149,7 +149,9 @@ def test_pack_without_quantities_is_refused(session):
     assert res["error"] == "missing_quantities"
     assert res["needs_computed_quantities_json"] is True
     # Les quatre annexes concernées sont nommées.
-    assert set(res["empty_deliverables"]) == {"SHAB", "Zones/Espaces", "Menuiseries", "Plancher"}
+    # Plancher n'y figure plus : il n'est plus généré du tout (bloqué par une
+    # règle métier), donc il ne peut pas sortir « vide ».
+    assert set(res["empty_deliverables"]) == {"SHAB", "Zones/Espaces", "Menuiseries"}
     assert "computed_quantities_json" in res["next_step"]
 
 
@@ -174,7 +176,6 @@ def test_availability_tool_signals_the_need_upfront(session):
         "SHAB",
         "Zones/Espaces",
         "Menuiseries",
-        "Plancher",
     }
     assert "export_computed_base_quantities" in res["next_action"]
 
@@ -203,7 +204,7 @@ def test_pack_with_computed_json_is_generated(session, tmp_path):
         # 0.9 x 2.1 était la PORTE : ce livrable a pour gabarit
         # « Fenêtres Ok » et ne collecte plus que des IfcWindow.
         ("menuiseries_xlsx", (0.6, 1.3)),
-        ("plancher_xlsx", (156.4,)),
+        # plancher retiré du pack : bloqué par une règle métier absente.
     ],
 )
 def test_quantity_columns_contain_real_values(session, tmp_path, annexe, valeurs_attendues):

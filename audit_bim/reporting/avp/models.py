@@ -116,7 +116,10 @@ class AvpReportPack:
     zones_espaces_xlsx: Path
     enveloppe_xlsx: Path
     menuiseries_xlsx: Path
-    plancher_xlsx: Path
+    # ``None`` quand le rapport est bloqué par une règle métier absente : le
+    # fichier n'est alors pas écrit du tout. Un chemin vers un classeur non
+    # conforme serait pire qu'une absence — il se lirait comme un livrable.
+    plancher_xlsx: Path | None
     analyse_docx: Path
     analyse_pdf: Path | None = None
 
@@ -127,7 +130,7 @@ class AvpReportPack:
             self.zones_espaces_xlsx,
             self.enveloppe_xlsx,
             self.menuiseries_xlsx,
-            self.plancher_xlsx,
+            *([self.plancher_xlsx] if self.plancher_xlsx is not None else []),
             self.analyse_docx,
         ]
         if self.analyse_pdf is not None:

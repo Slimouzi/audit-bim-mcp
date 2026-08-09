@@ -1,0 +1,229 @@
+"""Le livrable **Plancher** est bloqué par une règle métier absente.
+
+Nous savons extraire les dalles, les typer et les étager correctement : #212 a
+retrouvé les **49 groupes** du gabarit à l'identique — mêmes clés (Type, Étage),
+0 surface divergente, somme identique au centième. Ce n'est donc pas un problème
+de données.
+
+Ce que nous ne savons pas produire, c'est la **Surface de plancher**. Le gabarit
+la totalise sur **19 des 49 groupes** — une sélection métier des types qui
+constituent le plancher, hors toitures zinc, faux plafonds BA13 et dalles
+extérieures. Mesuré : le calque ne la discrimine pas (« Béton 300 », retenu, et
+« Bois lamellé-collé 80 », exclu, partagent ``241 - DALLES - Intérieures``), et
+la règle réglementaire la plus défendable donne 20 groupes, pas 19.
+
+Un quasi-livrable serait pire qu'un refus clair : il se lirait comme un contrôle
+alors que son total serait faux. Tant que la règle n'est pas définie, le rapport
+est **blocked**, et rien n'est écrit.
+
+Ce fichier fige les quatre conséquences : l'annonce, le refus avant écriture, la
+génération des autres exports, et la survie du détail comme donnée d'audit.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from audit_bim.extraction.model_data import ModelSnapshot
+from audit_bim.reporting.avp_i3f import write_avp_i3f_report_pack
+from audit_bim.reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
+from audit_bim.reporting.avp_snapshot import build_plancher_from_snapshot
+
+_CLE = "plancher"
+
+
+def _dalle(uuid: str, composite: str, epaisseur: float, aire: float) -> dict:
+    return {
+        "uuid": uuid,
+        "type": "IfcSlab",
+        "name": "Dalle",
+        "object_type": None,
+        "property_sets": [
+            {
+                "name": "BaseQuantities",
+                "properties": [
+                    {"definition": {"name": "NetArea"}, "value": aire},
+                    {"definition": {"name": "Width"}, "value": epaisseur},
+                ],
+            },
+            {
+                "name": "ArchiCADProperties",
+                "properties": [
+                    {
+                        "definition": {
+                            "name": "Matériau de construction / Composite / Profil / Hachure"
+                        },
+                        "value": composite,
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def _snapshot() -> ModelSnapshot:
+    """Une maquette dont les dalles sont COMPLÈTES : le blocage ne peut donc
+    pas venir d'un manque de données."""
+    espace = {
+        "uuid": "SP1",
+        "type": "IfcSpace",
+        "name": "S1",
+        "longname": "CHAMBRE",
+        "property_sets": [
+            {
+                "name": "BaseQuantities",
+                "properties": [{"definition": {"name": "NetFloorArea"}, "value": 12.0}],
+            }
+        ],
+    }
+    zone = {
+        "uuid": "Z1",
+        "type": "IfcZone",
+        "name": "LGT-01",
+        "attributes": {
+            "properties": [{"definition": {"name": "ObjectType"}, "value": "Zone Logement T2"}]
+        },
+    }
+    return ModelSnapshot(
+        project={"name": "P"},
+        model={"name": "M.ifc"},
+        spaces=[{"uuid": "SP1", "name": "S1"}],
+        zones=[{"uuid": "Z1", "name": "LGT-01", "spaces": [{"uuid": "SP1"}]}],
+        elements=[
+            _dalle("SL1", "Béton", 0.30, 224.03),
+            _dalle("SL2", "Bois lamellé-collé", 0.08, 3.74),
+            espace,
+            zone,
+        ],
+    ).index()
+
+
+# ── 1. L'annonce ───────────────────────────────────────────────────────────
+
+
+def test_le_catalogue_declare_le_blocage_et_son_motif():
+    spec = REPORT_SPECS_BY_KEY[_CLE]
+    assert spec.blocked_reason, "le blocage doit être déclaré, pas implicite"
+    assert "règle métier" in spec.blocked_reason
+    assert "19" in spec.blocked_reason and "49" in spec.blocked_reason
+
+
+def test_la_disponibilite_annonce_blocked_sans_masquer_les_donnees():
+    """Non-vacuité : ``available_data`` est **non vide**. Si le blocage venait
+    d'un manque de données, ce test passerait pour la mauvaise raison."""
+    from audit_bim.reporting.avp_availability import inspect_avp_report_availability
+
+    av = {a.key: a for a in inspect_avp_report_availability(_snapshot())}[_CLE]
+    assert av.can_generate is False
+    assert av.status == "blocked"
+    assert av.available_data, "les dalles sont présentes : le motif n'est pas la donnée"
+    assert "compléter la maquette" not in av.next_action
+
+
+# ── 2. Le refus, AVANT écriture ────────────────────────────────────────────
+
+
+def test_demander_plancher_nommement_refuse_avant_toute_ecriture(tmp_path, monkeypatch):
+    """Nommer un rapport bloqué mérite un refus explicite, pas une omission
+    silencieuse — et le refus doit précéder la création du moindre fichier."""
+    from audit_bim.mcp.session import _Session, current_session
+    from audit_bim.profiles.i3f import tools_reporting
+
+    monkeypatch.setenv("AUDIT_OUTPUT_DIR", str(tmp_path))
+    sess = _Session()
+    sess.snapshot = _snapshot()
+    jeton = current_session.set(sess)
+    try:
+        sortie = tmp_path / "pack"
+        res = tools_reporting.generate_avp_i3f_pack(
+            output_dir=str(sortie),
+            reports=[_CLE],
+            project_name="P",
+            project_code="C",
+            phase="AVP",
+            auditor_name="S",
+            export_pdf=False,
+        )
+    finally:
+        current_session.reset(jeton)
+
+    assert res["status"] == "error"
+    assert res["error"] == "report_blocked"
+    assert _CLE in res["blocked_reports"]
+    assert "règle métier" in res["blocked_reports"][_CLE]
+    assert not sortie.exists(), "un dossier a été créé malgré le refus"
+
+
+# ── 3. Les autres exports restent générables ───────────────────────────────
+
+
+def test_un_pack_sans_plancher_reste_generable(tmp_path):
+    """Le blocage retire UN rapport, il ne met pas le pack à l'arrêt."""
+    pack = write_avp_i3f_report_pack(None, tmp_path / "out", snapshot=_snapshot(), export_pdf=False)
+    assert pack.plancher_xlsx is None
+    assert not list((tmp_path / "out").glob("*plancher*")), "un fichier plancher a été écrit"
+    for chemin in pack.paths():
+        assert chemin.exists() and chemin.stat().st_size > 0
+    # Non-vacuité : les annexes qui dépendent des mêmes espaces sortent bien.
+    assert pack.shab_xlsx.exists() and pack.zones_espaces_xlsx.exists()
+
+
+def test_le_pack_trace_ce_quil_ecarte(tmp_path, monkeypatch):
+    """« Filtrer, c'est tracer » : une annexe absente sans explication se lit
+    comme un oubli."""
+    from audit_bim.mcp.session import _Session, current_session
+    from audit_bim.profiles.i3f import tools_reporting
+
+    monkeypatch.setenv("AUDIT_OUTPUT_DIR", str(tmp_path))
+    sess = _Session()
+    sess.snapshot = _snapshot()
+    jeton = current_session.set(sess)
+    try:
+        res = tools_reporting.generate_avp_i3f_pack(
+            output_dir=str(tmp_path / "pack"),
+            project_name="P",
+            project_code="C",
+            phase="AVP",
+            auditor_name="S",
+            export_pdf=False,
+        )
+    finally:
+        current_session.reset(jeton)
+
+    assert res.get("status") != "error", res
+    assert _CLE in res["blocked_reports"]
+    assert not any("plancher" in p.lower() for p in res["paths"])
+
+
+# ── 4. Le détail reste une donnée d'audit ──────────────────────────────────
+
+
+def test_les_groupes_de_dalles_restent_calculables():
+    """Ce qui est bloqué est la LIVRAISON, pas l'extraction. Le travail de #212
+    — composite, étage, provenance — reste disponible pour un audit."""
+    src = build_plancher_from_snapshot(_snapshot())
+    assert src is not None
+    detail = next(g for g in src.grids if g.title.startswith("TDB"))
+    types = {r[1] for r in detail.rows[1:]}
+    assert types == {"Béton 300", "Bois lamellé-collé 80"}
+
+
+def test_le_blocage_nest_pas_un_effacement_du_catalogue():
+    """La forme du livrable reste décrite : le jour où la règle existe, la
+    cible ne se réinvente pas."""
+    spec = REPORT_SPECS_BY_KEY[_CLE]
+    assert spec.expected_sheets and spec.headers and spec.critical_formulas
+    assert "Surface IFC OpenShell" in spec.headers
+
+
+# ── 5. Le blocage ne s'étend pas aux autres rapports ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "cle",
+    ["controle_maquettes", "shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries"],
+)
+def test_aucun_autre_rapport_nest_bloque(cle):
+    """Contre-épreuve du champ : s'il bloquait tout, les tests ci-dessus
+    passeraient sans rien prouver."""
+    assert REPORT_SPECS_BY_KEY[cle].blocked_reason is None

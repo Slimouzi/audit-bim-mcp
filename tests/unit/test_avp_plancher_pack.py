@@ -90,25 +90,42 @@ def test_count_planchers():
     assert count_planchers(None) == 0
 
 
-def test_pack_includes_non_empty_plancher(tmp_path):
+def test_le_pack_ne_livre_pas_plancher_tant_que_la_regle_manque(tmp_path):
+    """Le rapport est bloqué par une règle métier, pas par un manque de données.
+
+    On n'écrit donc AUCUN fichier plancher : un classeur dont la synthèse ne
+    peut pas être juste ferait un quasi-livrable, plus difficile à réfuter
+    qu'une absence. Les autres annexes restent produites.
+    """
     pack = write_avp_i3f_report_pack(
         None, tmp_path / "out", snapshot=_snap_with_slabs(), export_pdf=False
     )
-    assert pack.plancher_xlsx.exists() and pack.plancher_xlsx.stat().st_size > 0
-    assert pack.plancher_xlsx in pack.paths()
-    text = _all_text(pack.plancher_xlsx)
-    assert "Dalle RDC" in text
+    assert pack.plancher_xlsx is None
+    assert not any("plancher" in p.name.lower() for p in pack.paths())
+    assert not list((tmp_path / "out").glob("*plancher*"))
+    # Non-vacuité : le reste du pack sort bien.
+    assert pack.shab_xlsx.exists() and pack.controle_xlsx.exists()
 
 
-def test_pack_plancher_filename_convention(tmp_path):
-    pack = write_avp_i3f_report_pack(
-        None,
-        tmp_path / "out",
-        snapshot=_snap_with_slabs(),
-        project_name="Tarare",
-        project_code="0546L",
-        phase="AVP",
-        date="260203",
-        export_pdf=False,
+def test_le_detail_des_dalles_reste_calculable_comme_donnee_daudit(tmp_path):
+    """Ce qui est bloqué est la LIVRAISON, pas l'extraction. Les 49 groupes
+    reconstruits en #212 — type de composite, étage, provenance — restent
+    disponibles pour un audit ; ils ne sont simplement pas livrés comme onglet
+    conforme au gabarit."""
+    src = build_plancher_from_snapshot(_snap_with_slabs())
+    assert src is not None
+    detail = next(g for g in src.grids if g.title.startswith("TDB"))
+    assert [r[1] for r in detail.rows[1:]] and len(detail.rows) - 1 == 2
+
+
+def test_la_convention_de_nommage_du_plancher_reste_connue():
+    """Le fichier n'est plus produit, mais sa convention doit survivre au
+    blocage : le jour où la règle métier existe, le nom ne se réinvente pas."""
+    from audit_bim.reporting.avp.models import _deliverable_filename
+
+    assert (
+        _deliverable_filename(
+            "plancher", date="260203", project_name="Tarare", project_code="0546L", phase="AVP"
+        )
+        == "260203 Tarare 0546L AVP - export plancher.xlsx"
     )
-    assert pack.plancher_xlsx.name == "260203 Tarare 0546L AVP - export plancher.xlsx"

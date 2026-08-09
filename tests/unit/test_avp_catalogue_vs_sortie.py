@@ -36,6 +36,11 @@ from audit_bim.reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
 #: pas grandir sans faire échouer la suite.
 _FORMULES_ENCORE_CELLES_DU_GABARIT = {"surface_enveloppe", "menuiseries"}
 
+#: Rapports **bloqués par une règle métier** : ils n'écrivent aucun classeur,
+#: donc il n'y a rien à confronter. Le catalogue continue de décrire la forme
+#: qu'ils AURONT — supprimer cette description ferait perdre la cible.
+_BLOQUES_SANS_CLASSEUR = {"plancher"}
+
 
 def _snapshot() -> ModelSnapshot:
     """Maquette peuplant les cinq annexes générées depuis le snapshot.
@@ -129,11 +134,11 @@ def classeurs(tmp_path_factory) -> dict[str, Path]:
         "zones_espaces": pack.zones_espaces_xlsx,
         "surface_enveloppe": pack.enveloppe_xlsx,
         "menuiseries": pack.menuiseries_xlsx,
-        "plancher": pack.plancher_xlsx,
     }
 
 
-_CLES = ("shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries", "plancher")
+_CLES_TOUTES = ("shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries", "plancher")
+_CLES = tuple(c for c in _CLES_TOUTES if c not in _BLOQUES_SANS_CLASSEUR)
 
 
 def _normalise(formule: str) -> str:
@@ -239,3 +244,16 @@ def test_le_detail_zones_espaces_est_annonce_en_entier(classeurs, cle):
         f"{cle} : le catalogue annonce {len(REPORT_SPECS_BY_KEY[cle].headers)} colonnes, "
         f"le classeur en écrit {len(ecrits)}"
     )
+
+
+def test_un_rapport_bloque_ecrit_bien_aucun_classeur(classeurs):
+    """Non-vacuité de l'exclusion : si `plancher` produisait de nouveau un
+    fichier, ce test le dirait — et le garde catalogue↔sortie devrait le
+    reprendre en charge."""
+    from audit_bim.reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
+
+    for cle in _BLOQUES_SANS_CLASSEUR:
+        assert cle not in classeurs
+        assert REPORT_SPECS_BY_KEY[cle].blocked_reason, (
+            f"{cle} est exclu du garde sans être déclaré bloqué"
+        )
