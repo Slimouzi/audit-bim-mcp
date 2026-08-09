@@ -90,21 +90,16 @@ def test_count_planchers():
     assert count_planchers(None) == 0
 
 
-def test_le_pack_ne_livre_pas_plancher_tant_que_la_regle_manque(tmp_path):
-    """Le rapport est bloqué par une règle métier, pas par un manque de données.
-
-    On n'écrit donc AUCUN fichier plancher : un classeur dont la synthèse ne
-    peut pas être juste ferait un quasi-livrable, plus difficile à réfuter
-    qu'une absence. Les autres annexes restent produites.
-    """
+def test_le_pack_livre_de_nouveau_plancher(tmp_path):
+    """La règle métier de la Surface de plancher est établie : le livrable
+    revient. Ce qui était bloqué n'était pas l'extraction — les 49 groupes
+    étaient déjà reconstruits — mais la règle qui dit lesquels comptent."""
     pack = write_avp_i3f_report_pack(
         None, tmp_path / "out", snapshot=_snap_with_slabs(), export_pdf=False
     )
-    assert pack.plancher_xlsx is None
-    assert not any("plancher" in p.name.lower() for p in pack.paths())
-    assert not list((tmp_path / "out").glob("*plancher*"))
-    # Non-vacuité : le reste du pack sort bien.
-    assert pack.shab_xlsx.exists() and pack.controle_xlsx.exists()
+    assert pack.plancher_xlsx is not None and pack.plancher_xlsx.exists()
+    assert pack.plancher_xlsx in pack.paths()
+    assert "Dalle RDC" in _all_text(pack.plancher_xlsx)
 
 
 def test_le_detail_des_dalles_reste_calculable_comme_donnee_daudit(tmp_path):

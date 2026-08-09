@@ -268,23 +268,25 @@ def test_un_groupe_mixte_donne_deux_lignes_de_provenances_distinctes():
 # ── 4. Ce que le livrable ne dit pas, il le dit ─────────────────────────────
 
 
-def test_aucun_total_surface_de_plancher_nest_produit():
-    """Le gabarit totalise 19 des 49 groupes sous « Surface de plancher ».
-    Totaliser nos 49 dalles sous ce libellé afficherait une surface de plancher
-    qui n'en est pas une — la même erreur que le pivot Zones/Espaces."""
-    plat = [str(c) for rows in _grilles().values() for r in rows for c in r if c is not None]
+def test_sans_revetement_de_sol_aucune_surface_de_plancher_nest_totalisee():
+    """Les dalles de ce corpus ne portent aucun revêtement : aucune ne compose
+    un plancher. La synthèse reste donc vide et AUCUN total n'est écrit —
+    totaliser des dalles qui ne sont pas des planchers afficherait une
+    « Surface de plancher » qui n'en est pas une."""
     synthese = [str(c) for r in _grilles()[_SYNTHESE] for c in r if c is not None]
-    assert not any("SUM(" in c for c in synthese), "un total est écrit sous la synthèse"
-    assert any("Surface de plancher" in c for c in plat), (
-        "l'absence de ce total doit être expliquée, pas passée sous silence"
-    )
+    assert not any("Surface de plancher" in c for c in synthese)
+    assert not any(c.startswith("=SUM(D") for c in synthese)
 
 
-def test_la_note_de_methode_chiffre_ce_qui_nest_pas_un_plancher():
+def test_la_note_de_methode_enonce_la_regle_et_chiffre_les_deux_perimetres():
+    """La note doit permettre de retrouver l'écart entre l'inventaire complet
+    et la surface de plancher : sans elle, un lecteur qui somme le détail et
+    compare à la synthèse ne saurait pas d'où vient la différence."""
     note = _grilles()["Note de méthode"]
     par_cle = {r[0]: r[1] for r in note if len(r) == 2}
-    assert par_cle["groupes_de_dalles"] == 4  # le groupe mixte compte deux lignes
+    assert par_cle["groupes_de_dalles_inventories"] == 4
+    assert par_cle["groupes_contribuant_au_plancher"] == 0
     assert par_cle["surface_toutes_dalles_m2"] == pytest.approx(624.95)
     texte = " ".join(str(c) for r in note for c in r)
+    assert "revêtement de sol" in texte
     assert "n'est pas une surface de plancher" in texte
-    assert "arbitrage métier" in texte

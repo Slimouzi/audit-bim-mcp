@@ -148,10 +148,7 @@ def test_xlsx_annexes_are_non_empty(tmp_path):
         export_pdf=False,
     )
     annexes = _annexes(pack)
-    # 5 annexes : Plancher n'est plus produit, faute de règle métier de
-    # sélection des groupes contribuant à la Surface de plancher.
-    assert len(annexes) == 5
-    assert "Plancher" not in annexes
+    assert len(annexes) == 6
     empty = {label: p.name for label, p in annexes.items() if _annex_rows(label, p) == 0}
     assert not empty, f"annexes vides: {empty}"
 

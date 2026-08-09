@@ -19,6 +19,8 @@ avaient déjà divergé une fois.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from audit_bim.extraction.model_data import ModelSnapshot
@@ -28,6 +30,7 @@ from audit_bim.reporting.avp_i3f import (
     AvpReportSelectionError,
     write_avp_i3f_report_pack,
 )
+from audit_bim.reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
 
 
 def _espace(aire: float | None = 12.0) -> dict:
@@ -76,6 +79,19 @@ def _snapshot_shab_ok_fenetres_sans_dimensions() -> ModelSnapshot:
 
 def _generer(tmp_path, snap, **kw):
     return write_avp_i3f_report_pack(None, tmp_path / "out", snapshot=snap, export_pdf=False, **kw)
+
+
+@pytest.fixture
+def rapport_bloque(monkeypatch):
+    """Déclare ``plancher`` bloqué le temps du test.
+
+    Aucun rapport n'est bloqué aujourd'hui — la règle de la Surface de plancher
+    a levé le seul motif. Adosser ce contrat à un rapport réellement bloqué le
+    rendrait donc invérifiable ; on patche la spécification à la place.
+    """
+    spec = dataclasses.replace(REPORT_SPECS_BY_KEY["plancher"], blocked_reason="motif de test")
+    monkeypatch.setitem(REPORT_SPECS_BY_KEY, "plancher", spec)
+    return spec
 
 
 def _enveloppe_geometrique():
@@ -161,7 +177,7 @@ def test_le_builder_refuse_lui_meme_une_cle_inconnue(tmp_path):
     assert not (tmp_path / "out").exists(), "un dossier a été créé malgré le refus"
 
 
-def test_le_builder_refuse_lui_meme_un_rapport_bloque(tmp_path):
+def test_le_builder_refuse_lui_meme_un_rapport_bloque(tmp_path, rapport_bloque):
     with pytest.raises(AvpReportSelectionError) as refus:
         _generer(tmp_path, _snapshot_shab_ok_fenetres_sans_dimensions(), reports=["plancher"])
     assert "plancher" in refus.value.blocked
@@ -171,7 +187,7 @@ def test_le_builder_refuse_lui_meme_un_rapport_bloque(tmp_path):
 # ── Le helper lui-même ─────────────────────────────────────────────────────
 
 
-def test_la_normalisation_deduplique_et_reduit_au_produisible():
+def test_la_normalisation_deduplique_et_reduit_au_produisible(rapport_bloque):
     assert _normalize_report_selection(["shab_maquette", "shab_maquette"]) == frozenset(
         {"shab_maquette"}
     )
@@ -180,7 +196,12 @@ def test_la_normalisation_deduplique_et_reduit_au_produisible():
     assert {"shab_maquette", "zones_espaces", "menuiseries"} <= tous
 
 
-def test_la_normalisation_signale_les_deux_motifs_a_la_fois():
+def test_sans_blocage_tous_les_rapports_sont_produisibles():
+    """Contre-épreuve, et état du catalogue : plus aucun motif ne subsiste."""
+    assert _normalize_report_selection(None) == frozenset(REPORT_SPECS_BY_KEY)
+
+
+def test_la_normalisation_signale_les_deux_motifs_a_la_fois(rapport_bloque):
     """Une demande qui cumule les deux fautes doit les rendre toutes les deux :
     corriger l'une pour découvrir l'autre coûte un aller-retour."""
     with pytest.raises(AvpReportSelectionError) as refus:

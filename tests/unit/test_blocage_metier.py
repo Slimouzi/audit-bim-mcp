@@ -1,26 +1,23 @@
-"""Le livrable **Plancher** est bloqué par une règle métier absente.
+"""Le mécanisme de **blocage métier** d'un rapport, et l'état actuel du catalogue.
 
-Nous savons extraire les dalles, les typer et les étager correctement : #212 a
-retrouvé les **49 groupes** du gabarit à l'identique — mêmes clés (Type, Étage),
-0 surface divergente, somme identique au centième. Ce n'est donc pas un problème
-de données.
+Un rapport peut avoir toutes ses entités et toutes ses quantités, et rester
+improduisible parce qu'une **règle métier** manque. `ReportSpec.blocked_reason`
+porte ce motif — distinct d'un manque de données, et la distinction porte
+l'action : on ne demande pas de compléter la maquette, on demande un arbitrage.
 
-Ce que nous ne savons pas produire, c'est la **Surface de plancher**. Le gabarit
-la totalise sur **19 des 49 groupes** — une sélection métier des types qui
-constituent le plancher, hors toitures zinc, faux plafonds BA13 et dalles
-extérieures. Mesuré : le calque ne la discrimine pas (« Béton 300 », retenu, et
-« Bois lamellé-collé 80 », exclu, partagent ``241 - DALLES - Intérieures``), et
-la règle réglementaire la plus défendable donne 20 groupes, pas 19.
+Plancher a été le premier cas : sa Surface de plancher totalise 19 des 49
+groupes de dalles, et rien ne disait lesquels. La règle est désormais établie et
+vérifiée (cf. ``test_surface_de_plancher_regle``), donc **aucun rapport n'est
+bloqué aujourd'hui**.
 
-Un quasi-livrable serait pire qu'un refus clair : il se lirait comme un contrôle
-alors que son total serait faux. Tant que la règle n'est pas définie, le rapport
-est **blocked**, et rien n'est écrit.
-
-Ce fichier fige les quatre conséquences : l'annonce, le refus avant écriture, la
-génération des autres exports, et la survie du détail comme donnée d'audit.
+Le mécanisme, lui, reste couvert : il est éprouvé sur une spécification
+**patchée**, pas sur un rapport réellement bloqué. Sans cela, lever le blocage
+de Plancher aurait emporté toute la couverture d'une machinerie qui resservira.
 """
 
 from __future__ import annotations
+
+import dataclasses
 
 import pytest
 
@@ -29,7 +26,29 @@ from audit_bim.reporting.avp_i3f import write_avp_i3f_report_pack
 from audit_bim.reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
 from audit_bim.reporting.avp_snapshot import build_plancher_from_snapshot
 
+#: Rapport servant de cobaye au mécanisme. On reprend ``plancher`` — le cas
+#: historique — parce que la maquette de test porte ses dalles : la non-vacuité
+#: « le blocage n'est pas un manque de données » n'a de sens que si les données
+#: sont effectivement là.
 _CLE = "plancher"
+_MOTIF = "Définir la règle métier de test avant toute génération."
+
+
+@pytest.fixture
+def rapport_bloque(monkeypatch):
+    """Déclare ``_CLE`` bloqué, le temps du test."""
+    spec = dataclasses.replace(REPORT_SPECS_BY_KEY[_CLE], blocked_reason=_MOTIF)
+    monkeypatch.setitem(REPORT_SPECS_BY_KEY, _CLE, spec)
+    # La sonde itère sur le TUPLE, pas sur le dictionnaire : patcher l'un sans
+    # l'autre laisserait la disponibilité répondre depuis l'ancienne spec.
+    from audit_bim.reporting import avp_availability
+
+    monkeypatch.setattr(
+        avp_availability,
+        "REPORT_SPECS",
+        tuple(spec if s.key == _CLE else s for s in avp_availability.REPORT_SPECS),
+    )
+    return spec
 
 
 def _dalle(uuid: str, composite: str, epaisseur: float, aire: float) -> dict:
@@ -101,14 +120,18 @@ def _snapshot() -> ModelSnapshot:
 # ── 1. L'annonce ───────────────────────────────────────────────────────────
 
 
-def test_le_catalogue_declare_le_blocage_et_son_motif():
-    spec = REPORT_SPECS_BY_KEY[_CLE]
-    assert spec.blocked_reason, "le blocage doit être déclaré, pas implicite"
-    assert "règle métier" in spec.blocked_reason
-    assert "19" in spec.blocked_reason and "49" in spec.blocked_reason
+def test_le_catalogue_declare_le_blocage_et_son_motif(rapport_bloque):
+    assert rapport_bloque.blocked_reason == _MOTIF, "le blocage doit être déclaré, pas implicite"
 
 
-def test_la_disponibilite_annonce_blocked_sans_masquer_les_donnees():
+def test_aucun_rapport_nest_bloque_aujourdhui():
+    """État du catalogue, distinct du mécanisme. La règle de la Surface de
+    plancher étant établie, plus aucun motif ne subsiste."""
+    bloques = {c: s.blocked_reason for c, s in REPORT_SPECS_BY_KEY.items() if s.blocked_reason}
+    assert bloques == {}, f"rapport(s) encore bloqué(s) : {sorted(bloques)}"
+
+
+def test_la_disponibilite_annonce_blocked_sans_masquer_les_donnees(rapport_bloque):
     """Non-vacuité : ``available_data`` est **non vide**. Si le blocage venait
     d'un manque de données, ce test passerait pour la mauvaise raison."""
     from audit_bim.reporting.avp_availability import inspect_avp_report_availability
@@ -123,7 +146,9 @@ def test_la_disponibilite_annonce_blocked_sans_masquer_les_donnees():
 # ── 2. Le refus, AVANT écriture ────────────────────────────────────────────
 
 
-def test_demander_plancher_nommement_refuse_avant_toute_ecriture(tmp_path, monkeypatch):
+def test_demander_un_rapport_bloque_refuse_avant_toute_ecriture(
+    tmp_path, monkeypatch, rapport_bloque
+):
     """Nommer un rapport bloqué mérite un refus explicite, pas une omission
     silencieuse — et le refus doit précéder la création du moindre fichier."""
     from audit_bim.mcp.session import _Session, current_session
@@ -150,25 +175,25 @@ def test_demander_plancher_nommement_refuse_avant_toute_ecriture(tmp_path, monke
     assert res["status"] == "error"
     assert res["error"] == "report_blocked"
     assert _CLE in res["blocked_reports"]
-    assert "règle métier" in res["blocked_reports"][_CLE]
+    assert res["blocked_reports"][_CLE] == _MOTIF
     assert not sortie.exists(), "un dossier a été créé malgré le refus"
 
 
 # ── 3. Les autres exports restent générables ───────────────────────────────
 
 
-def test_un_pack_sans_plancher_reste_generable(tmp_path):
+def test_un_pack_sans_le_rapport_bloque_reste_generable(tmp_path, rapport_bloque):
     """Le blocage retire UN rapport, il ne met pas le pack à l'arrêt."""
     pack = write_avp_i3f_report_pack(None, tmp_path / "out", snapshot=_snapshot(), export_pdf=False)
     assert pack.plancher_xlsx is None
-    assert not list((tmp_path / "out").glob("*plancher*")), "un fichier plancher a été écrit"
+    assert not list((tmp_path / "out").glob("*plancher*")), "un fichier bloqué a été écrit"
     for chemin in pack.paths():
         assert chemin.exists() and chemin.stat().st_size > 0
     # Non-vacuité : les annexes qui dépendent des mêmes espaces sortent bien.
     assert pack.shab_xlsx.exists() and pack.zones_espaces_xlsx.exists()
 
 
-def test_le_pack_trace_ce_quil_ecarte(tmp_path, monkeypatch):
+def test_le_pack_trace_ce_quil_ecarte(tmp_path, monkeypatch, rapport_bloque):
     """« Filtrer, c'est tracer » : une annexe absente sans explication se lit
     comme un oubli."""
     from audit_bim.mcp.session import _Session, current_session
@@ -208,12 +233,11 @@ def test_les_groupes_de_dalles_restent_calculables():
     assert types == {"Béton 300", "Bois lamellé-collé 80"}
 
 
-def test_le_blocage_nest_pas_un_effacement_du_catalogue():
+def test_le_blocage_nest_pas_un_effacement_du_catalogue(rapport_bloque):
     """La forme du livrable reste décrite : le jour où la règle existe, la
     cible ne se réinvente pas."""
     spec = REPORT_SPECS_BY_KEY[_CLE]
-    assert spec.expected_sheets and spec.headers and spec.critical_formulas
-    assert "Surface IFC OpenShell" in spec.headers
+    assert spec.expected_sheets and spec.headers
 
 
 # ── 5. Le blocage ne s'étend pas aux autres rapports ───────────────────────
@@ -283,7 +307,7 @@ def test_reports_refuse_une_cle_inconnue_avant_ecriture(tmp_path, monkeypatch):
     assert not (tmp_path / "pack").exists(), "un dossier a été créé malgré le refus"
 
 
-def test_reports_refuse_une_cle_bloquee_meme_accompagnee(tmp_path, monkeypatch):
+def test_reports_refuse_une_cle_bloquee_meme_accompagnee(tmp_path, monkeypatch, rapport_bloque):
     """Un rapport bloqué contamine toute la demande : on ne produit pas
     « la partie faisable » en silence."""
     res = _generer(tmp_path, monkeypatch, reports=["shab_maquette", _CLE])
@@ -307,10 +331,11 @@ def test_reports_none_produit_tout_ce_qui_est_produisible(tmp_path, monkeypatch)
         "export Menuiseries",
     ):
         assert any(attendu in n for n in noms), f"{attendu} manquant : {noms}"
-    assert not any("plancher" in n.lower() for n in noms)
 
 
-def test_deux_motifs_a_la_fois_sont_tous_deux_rendus_au_client(tmp_path, monkeypatch):
+def test_deux_motifs_a_la_fois_sont_tous_deux_rendus_au_client(
+    tmp_path, monkeypatch, rapport_bloque
+):
     """Le cœur cumulait déjà les deux motifs ; la traduction MCP sortait sur le
     premier et perdait le second.
 
@@ -325,13 +350,13 @@ def test_deux_motifs_a_la_fois_sont_tous_deux_rendus_au_client(tmp_path, monkeyp
     assert res["unknown_reports"] == ["typo"]
     assert _CLE in res["known_reports"]
     assert _CLE in res["blocked_reports"]
-    assert "règle métier" in res["blocked_reports"][_CLE]
+    assert res["blocked_reports"][_CLE] == _MOTIF
     # Le message porte les deux, pas seulement le premier rencontré.
     assert "typo" in res["message"] and _CLE in res["message"]
     assert not (tmp_path / "pack").exists()
 
 
-def test_un_seul_motif_garde_son_code_specifique(tmp_path, monkeypatch):
+def test_un_seul_motif_garde_son_code_specifique(tmp_path, monkeypatch, rapport_bloque):
     """Contre-épreuve : le code générique ne doit pas avaler les cas simples,
     qui portent l'information la plus utile."""
     inconnue = _generer(tmp_path, monkeypatch, reports=["typo"])

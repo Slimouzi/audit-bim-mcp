@@ -39,7 +39,7 @@ _FORMULES_ENCORE_CELLES_DU_GABARIT = {"surface_enveloppe", "menuiseries"}
 #: Rapports **bloqués par une règle métier** : ils n'écrivent aucun classeur,
 #: donc il n'y a rien à confronter. Le catalogue continue de décrire la forme
 #: qu'ils AURONT — supprimer cette description ferait perdre la cible.
-_BLOQUES_SANS_CLASSEUR = {"plancher"}
+_BLOQUES_SANS_CLASSEUR: set[str] = set()
 
 
 def _snapshot() -> ModelSnapshot:
@@ -75,6 +75,9 @@ def _snapshot() -> ModelSnapshot:
             }
         ],
     }
+    # La dalle porte un revêtement de sol et un composite intérieur : sans eux
+    # elle ne compose pas un plancher, la synthèse sort vide, et le garde
+    # confronterait le catalogue à un onglet sans aucune formule.
     dalle = {
         "uuid": "SL1",
         "type": "IfcSlab",
@@ -83,7 +86,20 @@ def _snapshot() -> ModelSnapshot:
             {
                 "name": "BaseQuantities",
                 "properties": [{"definition": {"name": "NetArea"}, "value": 12.98}],
-            }
+            },
+            {
+                "name": "ArchiCADProperties",
+                "properties": [
+                    {
+                        "definition": {"name": "Structure Composite"},
+                        "value": "DI 20+6+5+2 : … Carrelage",
+                    },
+                    {
+                        "definition": {"name": "Surface supérieure"},
+                        "value": "Carrelage - Blanc mat",
+                    },
+                ],
+            },
         ],
     }
     espace = {
@@ -134,6 +150,7 @@ def classeurs(tmp_path_factory) -> dict[str, Path]:
         "zones_espaces": pack.zones_espaces_xlsx,
         "surface_enveloppe": pack.enveloppe_xlsx,
         "menuiseries": pack.menuiseries_xlsx,
+        "plancher": pack.plancher_xlsx,
     }
 
 
@@ -257,3 +274,6 @@ def test_un_rapport_bloque_ecrit_bien_aucun_classeur(classeurs):
         assert REPORT_SPECS_BY_KEY[cle].blocked_reason, (
             f"{cle} est exclu du garde sans être déclaré bloqué"
         )
+    # Aujourd'hui l'ensemble est vide : tout rapport du catalogue est confronté
+    # à sa sortie. L'exclusion ne peut donc pas devenir un trou par oubli.
+    assert _BLOQUES_SANS_CLASSEUR == {c for c, s in REPORT_SPECS_BY_KEY.items() if s.blocked_reason}
