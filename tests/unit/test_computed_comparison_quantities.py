@@ -375,7 +375,7 @@ def _snapshot_fenetre_sans_native() -> ModelSnapshot:
     ).index()
 
 
-def test_une_dimension_bbox_ne_debloque_pas_la_generation():
+def test_une_dimension_bbox_ne_debloque_pas_la_generation(tmp_path):
     """Le trou que la garde bbox avait ouvert.
 
     La fusion injecte la valeur calculée dans le pset quand la native manque.
@@ -398,6 +398,17 @@ def test_une_dimension_bbox_ne_debloque_pas_la_generation():
     )
     assert _qa_missing_quantities(snap) == ["Menuiseries"], (
         "la fusion d'une valeur non comparable a débloqué la génération"
+    )
+
+    # …et le refus se produit AVANT écriture : aucun fichier ne doit exister.
+    from audit_bim.reporting.avp.models import AvpQaError
+    from audit_bim.reporting.avp_i3f import write_avp_i3f_report_pack
+
+    sortie = tmp_path / "pack"
+    with pytest.raises(AvpQaError, match="Menuiseries"):
+        write_avp_i3f_report_pack(None, sortie, snapshot=snap, export_pdf=False)
+    assert not sortie.exists() or not list(sortie.iterdir()), (
+        "un classeur a été écrit avant le refus"
     )
 
 
