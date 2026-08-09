@@ -1,277 +1,278 @@
 {
- "prompts": [
-  "amo_bim_i3f"
- ],
- "tools": {
-  "apply_bcf_topics": [
-   "confirm",
-   "plan_path"
+  "prompts": [
+    "amo_bim_i3f"
   ],
-  "apply_classification_update_plan": [
-   "confirm",
-   "plan_path"
-  ],
-  "apply_classifications_from_xlsx": [
-   "confirm",
-   "xlsx_path"
-  ],
-  "apply_doe_enrichment_plan": [
-   "confirm",
-   "plan_path"
-  ],
-  "apply_smart_views_plan": [
-   "confirm",
-   "plan_path"
-  ],
-  "audit_trail": [
-   "limit"
-  ],
-  "check_bimdata_access": [],
-  "compare_with_previous_audit": [
-   "current_findings_json",
-   "previous_findings_json"
-  ],
-  "doe_match_only": [
-   "doe_path",
-   "limit",
-   "name_min_score",
-   "ocr_fallback",
-   "ocr_lang"
-  ],
-  "download_model_ifc": [
-   "cache_dir",
-   "overwrite"
-  ],
-  "enrich_with_public_data": [
-   "address_override",
-   "address_override_source",
-   "doe_path",
-   "include_dpe",
-   "include_georisques",
-   "include_plu",
-   "radius_dpe_m",
-   "radius_georisques_m"
-  ],
-  "extract_doe_records": [
-   "doe_path",
-   "limit",
-   "ocr_fallback",
-   "ocr_lang"
-  ],
-  "extract_model_snapshot": [
-   "cache_dir",
-   "compute_missing_quantities",
-   "computed_quantities_json",
-   "use_cache"
-  ],
-  "filter_bim_objects": [
-   "filter",
-   "include_spatial",
-   "output_path",
-   "with_finding_error_types",
-   "with_finding_severities",
-   "with_finding_themes"
-  ],
-  "full_audit": [
-   "access_token",
-   "auditor_name",
-   "cloud_id",
-   "confirm_context",
-   "expected_model_name",
-   "force_refresh_snapshot",
-   "model_id",
-   "output_dir",
-   "phase",
-   "project_address",
-   "project_description",
-   "project_id",
-   "push_mode"
-  ],
-  "generate_avp_i3f_pack": [
-   "auditor",
-   "auditor_name",
-   "auteur_controle",
-   "auto_compute_envelope",
-   "auto_compute_quantities",
-   "computed_quantities_json",
-   "confirm_context",
-   "controle_xlsx",
-   "date_controle",
-   "envelope_filter_mode",
-   "envelope_json",
-   "envelope_layer_pattern",
-   "envelope_type_pattern",
-   "enveloppe_xlsx",
-   "export_pdf",
-   "force_recompute_envelope",
-   "force_recompute_quantities",
-   "ifc_path",
-   "menuiseries_xlsx",
-   "nombre_logements",
-   "output_dir",
-   "phase",
-   "plancher_xlsx",
-   "project_code",
-   "project_name",
-   "shab_xlsx",
-   "temoin_virtuel",
-   "usages_bim",
-   "zones_espaces_xlsx"
-  ],
-  "generate_word_report": [
-   "auditor",
-   "auditor_name",
-   "confirm_context",
-   "output_path",
-   "overwrite",
-   "project_address",
-   "project_description",
-   "project_phase",
-   "xlsx_annex_path"
-  ],
-  "generate_xlsx_annex": [
-   "output_path",
-   "overwrite"
-  ],
-  "get_catalog_properties": [
-   "ifc_class",
-   "limit",
-   "phase",
-   "theme"
-  ],
-  "get_object_detail": [
-   "include_psets",
-   "include_quantities",
-   "uuid"
-  ],
-  "import_preliminary_findings": [
-   "boundaries_json",
-   "inventory_json",
-   "openings_json",
-   "space_clash_json",
-   "surface_loss_json"
-  ],
-  "list_audit_findings": [
-   "filter",
-   "output_path"
-  ],
-  "list_avp_i3f_xls_reports": [
-   "include_templates",
-   "require_identical"
-  ],
-  "list_classification_suggestions": [
-   "filter",
-   "output_path",
-   "populate"
-  ],
-  "list_classification_systems": [],
-  "list_mcp_profiles": [
-   "profile_id"
-  ],
-  "list_query_presets": [],
-  "list_write_plans": [
-   "limit"
-  ],
-  "match_doe_to_ifc": [
-   "doe_path",
-   "limit",
-   "name_min_score",
-   "ocr_fallback",
-   "ocr_lang"
-  ],
-  "parse_bimdata_target": [
-   "url"
-  ],
-  "parse_owner_requirements": [],
-  "prepare_bcf_topics": [
-   "finding_filter",
-   "include_overview",
-   "prefix"
-  ],
-  "prepare_classification_update_plan": [
-   "default_to_accepted_only",
-   "suggestion_filter"
-  ],
-  "prepare_doe_enrichment_plan": [
-   "doe_path",
-   "name_min_score",
-   "ocr_fallback",
-   "ocr_lang",
-   "on_conflict"
-  ],
-  "prepare_smart_view_from_filter_plan": [
-   "color",
-   "description",
-   "filter",
-   "include_spatial",
-   "name",
-   "with_finding_error_types",
-   "with_finding_severities",
-   "with_finding_themes"
-  ],
-  "prepare_smart_views_plan": [
-   "finding_filter",
-   "include_overview",
-   "prefix"
-  ],
-  "project_context_questions": [],
-  "query_bim_data": [
-   "fields",
-   "filter",
-   "flatten_lists",
-   "include_cells",
-   "include_empty",
-   "limit",
-   "offset",
-   "output_path"
-  ],
-  "query_bim_preset": [
-   "filter",
-   "flatten_lists",
-   "include_empty",
-   "limit",
-   "offset",
-   "output_path",
-   "preset"
-  ],
-  "query_findings": [
-   "error_type",
-   "ifc_type",
-   "limit",
-   "severity",
-   "theme"
-  ],
-  "run_audit_tool": [],
-  "set_active_model": [
-   "access_token",
-   "classification_system",
-   "cloud_id",
-   "model_id",
-   "phase",
-   "project_id"
-  ],
-  "set_owner_documents": [
-   "cch_pdf",
-   "data_spec_xlsx",
-   "naming_spec_xlsx"
-  ],
-  "show_filtered_objects_in_viewer": [
-   "filter",
-   "include_spatial",
-   "mode",
-   "output_path",
-   "with_finding_error_types",
-   "with_finding_severities",
-   "with_finding_themes"
-  ],
-  "update_suggestion_status": [
-   "element_uuid",
-   "status"
-  ],
-  "verify_active_model": [
-   "expected_model_name",
-   "refresh_snapshot",
-   "use_cache"
-  ]
- }
+  "tools": {
+    "apply_bcf_topics": [
+      "confirm",
+      "plan_path"
+    ],
+    "apply_classification_update_plan": [
+      "confirm",
+      "plan_path"
+    ],
+    "apply_classifications_from_xlsx": [
+      "confirm",
+      "xlsx_path"
+    ],
+    "apply_doe_enrichment_plan": [
+      "confirm",
+      "plan_path"
+    ],
+    "apply_smart_views_plan": [
+      "confirm",
+      "plan_path"
+    ],
+    "audit_trail": [
+      "limit"
+    ],
+    "check_bimdata_access": [],
+    "compare_with_previous_audit": [
+      "current_findings_json",
+      "previous_findings_json"
+    ],
+    "doe_match_only": [
+      "doe_path",
+      "limit",
+      "name_min_score",
+      "ocr_fallback",
+      "ocr_lang"
+    ],
+    "download_model_ifc": [
+      "cache_dir",
+      "overwrite"
+    ],
+    "enrich_with_public_data": [
+      "address_override",
+      "address_override_source",
+      "doe_path",
+      "include_dpe",
+      "include_georisques",
+      "include_plu",
+      "radius_dpe_m",
+      "radius_georisques_m"
+    ],
+    "extract_doe_records": [
+      "doe_path",
+      "limit",
+      "ocr_fallback",
+      "ocr_lang"
+    ],
+    "extract_model_snapshot": [
+      "cache_dir",
+      "compute_missing_quantities",
+      "computed_quantities_json",
+      "use_cache"
+    ],
+    "filter_bim_objects": [
+      "filter",
+      "include_spatial",
+      "output_path",
+      "with_finding_error_types",
+      "with_finding_severities",
+      "with_finding_themes"
+    ],
+    "full_audit": [
+      "access_token",
+      "auditor_name",
+      "cloud_id",
+      "confirm_context",
+      "expected_model_name",
+      "force_refresh_snapshot",
+      "model_id",
+      "output_dir",
+      "phase",
+      "project_address",
+      "project_description",
+      "project_id",
+      "push_mode"
+    ],
+    "generate_avp_i3f_pack": [
+      "auditor",
+      "auditor_name",
+      "auteur_controle",
+      "auto_compute_envelope",
+      "auto_compute_quantities",
+      "computed_quantities_json",
+      "confirm_context",
+      "controle_xlsx",
+      "date_controle",
+      "envelope_filter_mode",
+      "envelope_json",
+      "envelope_layer_pattern",
+      "envelope_type_pattern",
+      "enveloppe_xlsx",
+      "export_pdf",
+      "force_recompute_envelope",
+      "force_recompute_quantities",
+      "ifc_path",
+      "menuiseries_xlsx",
+      "nombre_logements",
+      "output_dir",
+      "phase",
+      "plancher_xlsx",
+      "project_code",
+      "project_name",
+      "reports",
+      "shab_xlsx",
+      "temoin_virtuel",
+      "usages_bim",
+      "zones_espaces_xlsx"
+    ],
+    "generate_word_report": [
+      "auditor",
+      "auditor_name",
+      "confirm_context",
+      "output_path",
+      "overwrite",
+      "project_address",
+      "project_description",
+      "project_phase",
+      "xlsx_annex_path"
+    ],
+    "generate_xlsx_annex": [
+      "output_path",
+      "overwrite"
+    ],
+    "get_catalog_properties": [
+      "ifc_class",
+      "limit",
+      "phase",
+      "theme"
+    ],
+    "get_object_detail": [
+      "include_psets",
+      "include_quantities",
+      "uuid"
+    ],
+    "import_preliminary_findings": [
+      "boundaries_json",
+      "inventory_json",
+      "openings_json",
+      "space_clash_json",
+      "surface_loss_json"
+    ],
+    "list_audit_findings": [
+      "filter",
+      "output_path"
+    ],
+    "list_avp_i3f_xls_reports": [
+      "include_templates",
+      "require_identical"
+    ],
+    "list_classification_suggestions": [
+      "filter",
+      "output_path",
+      "populate"
+    ],
+    "list_classification_systems": [],
+    "list_mcp_profiles": [
+      "profile_id"
+    ],
+    "list_query_presets": [],
+    "list_write_plans": [
+      "limit"
+    ],
+    "match_doe_to_ifc": [
+      "doe_path",
+      "limit",
+      "name_min_score",
+      "ocr_fallback",
+      "ocr_lang"
+    ],
+    "parse_bimdata_target": [
+      "url"
+    ],
+    "parse_owner_requirements": [],
+    "prepare_bcf_topics": [
+      "finding_filter",
+      "include_overview",
+      "prefix"
+    ],
+    "prepare_classification_update_plan": [
+      "default_to_accepted_only",
+      "suggestion_filter"
+    ],
+    "prepare_doe_enrichment_plan": [
+      "doe_path",
+      "name_min_score",
+      "ocr_fallback",
+      "ocr_lang",
+      "on_conflict"
+    ],
+    "prepare_smart_view_from_filter_plan": [
+      "color",
+      "description",
+      "filter",
+      "include_spatial",
+      "name",
+      "with_finding_error_types",
+      "with_finding_severities",
+      "with_finding_themes"
+    ],
+    "prepare_smart_views_plan": [
+      "finding_filter",
+      "include_overview",
+      "prefix"
+    ],
+    "project_context_questions": [],
+    "query_bim_data": [
+      "fields",
+      "filter",
+      "flatten_lists",
+      "include_cells",
+      "include_empty",
+      "limit",
+      "offset",
+      "output_path"
+    ],
+    "query_bim_preset": [
+      "filter",
+      "flatten_lists",
+      "include_empty",
+      "limit",
+      "offset",
+      "output_path",
+      "preset"
+    ],
+    "query_findings": [
+      "error_type",
+      "ifc_type",
+      "limit",
+      "severity",
+      "theme"
+    ],
+    "run_audit_tool": [],
+    "set_active_model": [
+      "access_token",
+      "classification_system",
+      "cloud_id",
+      "model_id",
+      "phase",
+      "project_id"
+    ],
+    "set_owner_documents": [
+      "cch_pdf",
+      "data_spec_xlsx",
+      "naming_spec_xlsx"
+    ],
+    "show_filtered_objects_in_viewer": [
+      "filter",
+      "include_spatial",
+      "mode",
+      "output_path",
+      "with_finding_error_types",
+      "with_finding_severities",
+      "with_finding_themes"
+    ],
+    "update_suggestion_status": [
+      "element_uuid",
+      "status"
+    ],
+    "verify_active_model": [
+      "expected_model_name",
+      "refresh_snapshot",
+      "use_cache"
+    ]
+  }
 }

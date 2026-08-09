@@ -221,7 +221,10 @@ _I3F_PROFILE = McpProfile(
             label="Pack AVP I3F",
             current_location="audit_bim/reporting/avp",
             status="ready",
-            responsibility="Produire les six annexes XLSX et le rapport Word selon le modèle I3F.",
+            responsibility=(
+                "Produire les annexes XLSX produisibles et le rapport Word selon le "
+                "modèle I3F. Plancher est bloqué faute de règle métier de sélection."
+            ),
         ),
         ClientSpecialization(
             key="tools_i3f",

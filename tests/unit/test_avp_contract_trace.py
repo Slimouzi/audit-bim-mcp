@@ -39,6 +39,9 @@ CLES_PUBLIQUES = {
     "envelope_json_used",
     "computed_quantities_json_used",
     "computed_quantities_coverage",
+    # Ajoutée délibérément : un pack qui écarte un rapport doit dire lequel et
+    # pourquoi. Une annexe absente sans explication se lit comme un oubli.
+    "blocked_reports",
     "active_cloud_id",
     "active_project_id",
     "active_model_id",

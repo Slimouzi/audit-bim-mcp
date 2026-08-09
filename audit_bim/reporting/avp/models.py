@@ -111,25 +111,33 @@ class AvpMeta:
 
 @dataclass
 class AvpReportPack:
-    controle_xlsx: Path
-    shab_xlsx: Path
-    zones_espaces_xlsx: Path
-    enveloppe_xlsx: Path
-    menuiseries_xlsx: Path
-    plancher_xlsx: Path
+    # ``None`` = annexe NON PRODUITE : soit le rapport est bloqué par une règle
+    # métier absente, soit il n'a pas été demandé. Un chemin vers un classeur
+    # non conforme — ou vers un classeur qu'on n'a pas demandé — serait pire
+    # qu'une absence : il se lirait comme un livrable.
+    controle_xlsx: Path | None
+    shab_xlsx: Path | None
+    zones_espaces_xlsx: Path | None
+    enveloppe_xlsx: Path | None
+    menuiseries_xlsx: Path | None
+    plancher_xlsx: Path | None
     analyse_docx: Path
     analyse_pdf: Path | None = None
 
     def paths(self) -> list[Path]:
         out = [
-            self.controle_xlsx,
-            self.shab_xlsx,
-            self.zones_espaces_xlsx,
-            self.enveloppe_xlsx,
-            self.menuiseries_xlsx,
-            self.plancher_xlsx,
-            self.analyse_docx,
+            p
+            for p in (
+                self.controle_xlsx,
+                self.shab_xlsx,
+                self.zones_espaces_xlsx,
+                self.enveloppe_xlsx,
+                self.menuiseries_xlsx,
+                self.plancher_xlsx,
+            )
+            if p is not None
         ]
+        out.append(self.analyse_docx)
         if self.analyse_pdf is not None:
             out.append(self.analyse_pdf)
         return out

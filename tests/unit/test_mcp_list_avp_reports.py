@@ -53,15 +53,22 @@ def test_lists_six_reports_in_order(_isolated):
     ]
 
 
-def test_plancher_partial_and_not_identical_snapshot_only(_isolated):
+def test_plancher_est_annonce_bloque_avec_un_next_action_actionnable(_isolated):
+    """Le tool MCP doit dire au client CE QU'IL DOIT FAIRE.
+
+    « Bloqué » sans motif renverrait à compléter la maquette — une fausse
+    piste : les dalles sont là, typées et étagées. Ce qui manque est un
+    arbitrage métier.
+    """
     _isolated.snapshot = _snap_with_slab()
     out = tools_reporting.list_avp_i3f_xls_reports()
     plancher = next(r for r in out["reports"] if r["key"] == "plancher")
-    assert plancher["can_generate"] is True
-    # Snapshot seul : jamais « à l'identique » sans mode template MOA.
+    assert plancher["can_generate"] is False
     assert plancher["can_generate_identical"] is False
-    assert plancher["status"] == "partial"
-    assert plancher["source_xlsx_required_for_identical"] is True
+    assert plancher["status"] == "blocked"
+    assert "règle métier" in plancher["next_action"]
+    # Non-vacuité : les données sont bien reconnues comme présentes.
+    assert plancher["available_data"], "un blocage métier ne doit pas masquer les données"
 
 
 def test_no_snapshot_blocks_but_still_lists(_isolated):

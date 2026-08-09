@@ -905,6 +905,7 @@ def _build_avp_pack(
     nombre_logements: str | None,
     temoin_virtuel: str | None,
     date_controle: str | None,
+    reports: list[str] | None,
     export_pdf: bool,
 ) -> AvpPackBuildResult:
     """Produit le pack AVP, ou rend le refus QA correspondant."""
@@ -925,6 +926,7 @@ def _build_avp_pack(
             project_name=identity.project_name,
             project_code=identity.project_code,
             phase=identity.phase or "AVP",
+            reports=None if reports is None else frozenset(reports),
             # Auteur validé/fourni (ou repli « AMO BIM » uniquement sous
             # confirm_context — voluntary confirmation).
             auditor=identity.auteur_controle or NOT_AVAILABLE,
@@ -974,9 +976,18 @@ def _format_avp_pack_response(
     computed_trace: AvpContractTrace,
 ) -> dict:
     """Payload de succès du tool AVP, séparé de la QA gate."""
+    from ...reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
+
     return {
         "output_dir": str(out_dir),
         "paths": [str(p) for p in pack.paths()],
+        # Un pack peut écarter un rapport, mais il doit dire lequel et pourquoi :
+        # une annexe absente sans explication se lit comme un oubli.
+        "blocked_reports": {
+            cle: spec.blocked_reason
+            for cle, spec in REPORT_SPECS_BY_KEY.items()
+            if spec.blocked_reason is not None
+        },
         "analyse_docx": str(pack.analyse_docx),
         "analyse_pdf": str(pack.analyse_pdf) if pack.analyse_pdf else None,
         "pdf_available": pack.analyse_pdf is not None,
@@ -1035,14 +1046,20 @@ def generate_avp_i3f_pack(
     temoin_virtuel: str | None = None,
     date_controle: str | None = None,
     auteur_controle: str | None = None,
+    reports: list[str] | None = None,
     export_pdf: bool = True,
     confirm_context: bool = False,
 ) -> dict:
     """Génère le pack de livrables AVP I3F (charte BIMData).
 
-    Produit les 6 Excel (Contrôle Maquettes, SHAB, Zones/Espaces, Enveloppe,
-    Menuiseries, Plancher) + le rapport consolidé « Analyse BIM AVP » (.docx,
-    + .pdf best-effort). Les données métier sont **maquette-first** : elles
+    Produit le pack des rapports **produisibles** — par défaut les Excel
+    Contrôle Maquettes, SHAB, Zones/Espaces, Enveloppe et Menuiseries — plus le
+    rapport consolidé « Analyse BIM AVP » (.docx, + .pdf best-effort), toujours
+    généré. **Plancher est bloqué** tant que la règle métier de sélection des 19
+    groupes contribuant à la Surface de plancher n'est pas définie : il n'est pas
+    écrit, et son motif est rendu dans ``blocked_reports``. ``list_avp_i3f_xls_reports``
+    donne l'état à jour de chaque rapport. Les données métier sont
+    **maquette-first** : elles
     viennent du snapshot/audit courant et des quantités IFC extraites ou
     calculées via la chaîne IFC OpenShell. Les .xlsx MOA éventuellement fournis
     servent de **template de mise en forme** et de contexte documentaire
@@ -1138,6 +1155,15 @@ def generate_avp_i3f_pack(
             métadonnées opérationnelles du contrôle (issues du rapport I3F de
             référence) pour « Données d'entrée » / « Usages BIM 3F ». Absentes
             → « Information non disponible… ».
+        reports: clés catalogue des rapports XLS à produire — celles de
+            ``list_avp_i3f_xls_reports``. ``None`` (défaut) = tous ceux qui sont
+            produisibles. Sinon **seuls les rapports nommés sont écrits** ; le
+            rapport consolidé .docx est toujours produit, c'est lui qui porte
+            l'analyse. Refus **avant toute écriture**, sans créer le dossier de
+            sortie, si la sélection contient une clé inconnue (``unknown_report``)
+            ou un rapport bloqué par une règle métier (``report_blocked``) : une
+            faute de frappe qui produirait silencieusement autre chose que ce qui
+            est demandé serait pire qu'une erreur.
         export_pdf: tente la conversion .docx → .pdf (LibreOffice si présent).
         confirm_context: ``True`` pour générer malgré un **auteur du contrôle**
             manquant. Ne contourne **jamais** ce qui nomme les livrables —
@@ -1147,7 +1173,48 @@ def generate_avp_i3f_pack(
         ``{output_dir, paths, analyse_docx, analyse_pdf, pdf_available}`` ou
         ``{status: needs_context, missing, questions}``.
     """
+    from ...reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
     from ...reporting.avp_sources import AvpSourcePaths, load_sources, read_envelope_json
+
+    # Validation de la SÉLECTION, avant toute écriture. Une clé inconnue est
+    # refusée plutôt qu'ignorée : une faute de frappe qui produirait
+    # silencieusement autre chose que ce qui est demandé est pire qu'une erreur.
+    bloques = {
+        cle: spec.blocked_reason
+        for cle, spec in REPORT_SPECS_BY_KEY.items()
+        if spec.blocked_reason is not None
+    }
+    selection = None if reports is None else list(dict.fromkeys(reports))
+    if selection is not None:
+        inconnues = sorted(set(selection) - set(REPORT_SPECS_BY_KEY))
+        if inconnues:
+            return {
+                "status": "error",
+                "error": "unknown_report",
+                "unknown_reports": inconnues,
+                "known_reports": sorted(REPORT_SPECS_BY_KEY),
+                "message": (
+                    "Clé(s) de rapport inconnue(s) : "
+                    + ", ".join(inconnues)
+                    + ". Aucun fichier n'a été écrit."
+                ),
+                "next_step": "Utiliser les clés de ``list_avp_i3f_xls_reports``.",
+            }
+        demandes_bloques = sorted(set(selection) & set(bloques))
+        if demandes_bloques:
+            return {
+                "status": "error",
+                "error": "report_blocked",
+                "blocked_reports": {c: bloques[c] for c in demandes_bloques},
+                "message": (
+                    "Rapport(s) non produisibles : "
+                    + ", ".join(f"{c} — {bloques[c]}" for c in demandes_bloques)
+                ),
+                "next_step": (
+                    "Retirer ce(s) rapport(s) de ``reports``, ou définir la règle "
+                    "métier manquante. Aucun fichier n'a été écrit."
+                ),
+            }
 
     context = _validate_avp_context(
         controle_xlsx=controle_xlsx,
@@ -1348,6 +1415,7 @@ def generate_avp_i3f_pack(
         nombre_logements=nombre_logements,
         temoin_virtuel=temoin_virtuel,
         date_controle=date_controle,
+        reports=selection,
         export_pdf=export_pdf,
     )
     if build.response is not None:

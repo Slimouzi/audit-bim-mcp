@@ -111,6 +111,14 @@ class ReportSpec:
     headers: tuple[str, ...]
     critical_formulas: tuple[str, ...]
     requirements: tuple[DataRequirement, ...]
+    #: Motif de blocage **métier**, indépendant des données de la maquette.
+    #:
+    #: Un rapport peut avoir toutes ses entités et toutes ses quantités, et
+    #: rester improduisible parce qu'une **règle métier** manque. Le distinguer
+    #: d'un manque de données compte : on ne demande pas de compléter la
+    #: maquette, on demande un arbitrage. Non vide ⇒ ``can_generate=False`` et
+    #: refus de génération, quelles que soient les ``requirements``.
+    blocked_reason: str | None = None
 
     @property
     def template_path(self) -> Path | None:
@@ -383,6 +391,24 @@ REPORT_SPECS: tuple[ReportSpec, ...] = (
         # déclarons pas. Annoncer une formule qu'on choisit de ne jamais écrire
         # est exactement le décalage que ce catalogue doit éviter.
         critical_formulas=('IF(OR(Dn="",En=""),"",IF(En-Dn=0,"",En/Dn-1))',),
+        # L'onglet de synthèse du gabarit totalise « Surface de plancher » sur
+        # 19 des 49 groupes de dalles — une SÉLECTION MÉTIER des types qui
+        # constituent le plancher, hors toitures zinc, faux plafonds BA13 et
+        # dalles extérieures. Mesuré : le calque ne la discrimine pas
+        # (« Béton 300 » retenu et « Bois lamellé-collé 80 » exclu partagent
+        # « 241 - DALLES - Intérieures »), et la règle réglementaire la plus
+        # défendable donne 20 groupes, pas 19.
+        #
+        # Nous savons extraire les dalles, les typer et les étager correctement
+        # (#212 : 49 groupes retrouvés à l'identique). Nous ne savons pas
+        # produire la Surface de plancher. Un quasi-livrable serait pire qu'un
+        # refus clair : bloqué tant que la règle n'est pas définie.
+        blocked_reason=(
+            "Définir la règle métier de sélection des groupes de dalles "
+            "contribuant à la Surface de plancher : le gabarit en retient 19 "
+            "sur 49, et cette sélection n'est portée par aucune donnée de la "
+            "maquette."
+        ),
         requirements=(
             DataRequirement("IfcSlab", "Dalles / planchers (IfcSlab)", "ifc_entity", _SLAB_CLASSES),
             DataRequirement(

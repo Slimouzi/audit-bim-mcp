@@ -227,13 +227,17 @@ def _availability_for_spec(
                 core_ok = False
                 missing_core.append(req.label)
 
-    can_generate = core_ok
+    # Un blocage MÉTIER prime sur la disponibilité des données : le rapport
+    # peut avoir toutes ses entités et rester improduisible faute d'une règle.
+    can_generate = core_ok and spec.blocked_reason is None
     # La disponibilité des données IFC ne suffit PAS : sans mode template (copie
     # du workbook, préservation formules/pivots/styles), la génération courante
     # reconstruit un rapport MOA mais pas une reproduction stricte.
     can_generate_identical = identical_ok and _MOA_TEMPLATE_MODE_AVAILABLE
 
-    if not can_generate:
+    if spec.blocked_reason is not None:
+        status = "blocked"
+    elif not can_generate:
         status = "blocked"
     elif can_generate_identical:
         status = "ready"
@@ -258,7 +262,11 @@ def _availability_for_spec(
         missing_data=missing,
         template_path=spec.resolved_template_path(),
         source_xlsx_required_for_identical=spec.requires_external_for_identical,
-        next_action=_next_action(status, missing_core, missing_external, computed_assisted),
+        next_action=(
+            spec.blocked_reason
+            if spec.blocked_reason is not None
+            else _next_action(status, missing_core, missing_external, computed_assisted)
+        ),
         computed_assisted=computed_assisted,
     )
 
