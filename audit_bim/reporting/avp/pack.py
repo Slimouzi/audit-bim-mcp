@@ -147,6 +147,7 @@ def write_avp_i3f_report_pack(
     temoin_virtuel: str | None = None,
     date_controle: str | None = None,
     auteur_controle: str | None = None,
+    reports: set[str] | frozenset[str] | None = None,
     export_pdf: bool = True,
     context: ReportProjectContext | None = None,  # noqa: ARG001 (compat future)
 ) -> AvpReportPack:
@@ -278,18 +279,39 @@ def write_avp_i3f_report_pack(
 
     out.mkdir(parents=True, exist_ok=True)
 
-    controle = _build_controle_maquettes_xlsx(out / fn_controle, result, sources, meta, snap)
-    shab = build_shab_xlsx(out / fn_shab, (sources.shab if sources else None), meta)
-    zones = build_zones_xlsx(out / fn_zones, (sources.zones_espaces if sources else None), meta)
-    enveloppe = _build_enveloppe_xlsx(out / fn_env, sources, meta)
-    menuiseries = _build_menuiseries_xlsx(out / fn_men, sources, meta)
-    # Rapport bloqué par une règle métier absente → on n'écrit RIEN. Produire
-    # un classeur dont la synthèse ne peut pas être juste ferait un
-    # quasi-livrable, plus difficile à réfuter qu'un refus clair.
+    # Un rapport est produit s'il est DEMANDÉ **et** non bloqué. Bloqué → on
+    # n'écrit rien : un classeur dont la synthèse ne peut pas être juste ferait
+    # un quasi-livrable, plus difficile à réfuter qu'un refus clair.
+    def _produit(cle: str) -> bool:
+        if REPORT_SPECS_BY_KEY[cle].blocked_reason is not None:
+            return False
+        return reports is None or cle in reports
+
+    controle = (
+        _build_controle_maquettes_xlsx(out / fn_controle, result, sources, meta, snap)
+        if _produit("controle_maquettes")
+        else None
+    )
+    shab = (
+        build_shab_xlsx(out / fn_shab, (sources.shab if sources else None), meta)
+        if _produit("shab_maquette")
+        else None
+    )
+    zones = (
+        build_zones_xlsx(out / fn_zones, (sources.zones_espaces if sources else None), meta)
+        if _produit("zones_espaces")
+        else None
+    )
+    enveloppe = (
+        _build_enveloppe_xlsx(out / fn_env, sources, meta)
+        if _produit("surface_enveloppe")
+        else None
+    )
+    menuiseries = (
+        _build_menuiseries_xlsx(out / fn_men, sources, meta) if _produit("menuiseries") else None
+    )
     plancher = (
-        None
-        if REPORT_SPECS_BY_KEY["plancher"].blocked_reason is not None
-        else _build_plancher_xlsx(out / fn_plancher, sources, meta)
+        _build_plancher_xlsx(out / fn_plancher, sources, meta) if _produit("plancher") else None
     )
     analyse = _build_analyse_bim_avp_docx(
         out / fn_analyse, result, sources, meta, snap, controle_xlsx=controle
@@ -366,22 +388,35 @@ def _qa_empty_deliverables(
     # 5ᵉ annexe : quand un audit est disponible, la « Grille de contrôle » doit
     # porter des points de contrôle réels (comptés SOUS son titre, hors entête/
     # légende/NOT_AVAILABLE). Vide malgré un audit = livrable non exploitable.
-    if result is not None:
+    # Une annexe NON PRODUITE — non demandée, ou bloquée — ne peut pas être
+    # « vide » : ne la contrôler qu'à condition qu'elle existe.
+    if result is not None and pack.controle_xlsx is not None:
         expected_controle = _audit_controle_table(result) is not None or not result.findings
         if expected_controle and _count_controle_rows(pack.controle_xlsx) == 0:
             problems.append("Contrôle")
     has_spaces_or_zones = bool(getattr(snap, "spaces", None)) or bool(getattr(snap, "zones", None))
     if has_spaces_or_zones:
-        if _count_business_rows(pack.shab_xlsx) == 0:
+        if pack.shab_xlsx is not None and _count_business_rows(pack.shab_xlsx) == 0:
             problems.append("SHAB")
-        if _count_business_rows(pack.zones_espaces_xlsx) == 0:
+        if (
+            pack.zones_espaces_xlsx is not None
+            and _count_business_rows(pack.zones_espaces_xlsx) == 0
+        ):
             problems.append("Zones/Espaces")
     # Murs CANDIDATS, pas murs à calque reconnu : ``count_envelope_walls`` est
     # layer-first (ArchiCAD) et tombe à zéro sur un export Revit, ce qui faisait
     # taire cette gate précisément sur les maquettes où l'annexe sortait vide.
-    if count_candidate_envelope_walls(snap) > 0 and _count_business_rows(pack.enveloppe_xlsx) == 0:
+    if (
+        pack.enveloppe_xlsx is not None
+        and count_candidate_envelope_walls(snap) > 0
+        and _count_business_rows(pack.enveloppe_xlsx) == 0
+    ):
         problems.append("Enveloppe")
-    if count_menuiseries(snap) > 0 and _count_business_rows(pack.menuiseries_xlsx) == 0:
+    if (
+        pack.menuiseries_xlsx is not None
+        and count_menuiseries(snap) > 0
+        and _count_business_rows(pack.menuiseries_xlsx) == 0
+    ):
         problems.append("Menuiseries")
     if (
         pack.plancher_xlsx is not None

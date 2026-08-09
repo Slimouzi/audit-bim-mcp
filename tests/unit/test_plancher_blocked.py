@@ -227,3 +227,84 @@ def test_aucun_autre_rapport_nest_bloque(cle):
     """Contre-épreuve du champ : s'il bloquait tout, les tests ci-dessus
     passeraient sans rien prouver."""
     assert REPORT_SPECS_BY_KEY[cle].blocked_reason is None
+
+
+# ── 6. ``reports`` est une VRAIE sélection ─────────────────────────────────
+
+
+def _generer(tmp_path, monkeypatch, **kw):
+    from audit_bim.mcp.session import _Session, current_session
+    from audit_bim.profiles.i3f import tools_reporting
+
+    monkeypatch.setenv("AUDIT_OUTPUT_DIR", str(tmp_path))
+    sess = _Session()
+    sess.snapshot = _snapshot()
+    jeton = current_session.set(sess)
+    try:
+        return tools_reporting.generate_avp_i3f_pack(
+            output_dir=str(tmp_path / "pack"),
+            project_name="P",
+            project_code="C",
+            phase="AVP",
+            auditor_name="S",
+            export_pdf=False,
+            **kw,
+        )
+    finally:
+        current_session.reset(jeton)
+
+
+def test_reports_ne_produit_que_les_rapports_demandes(tmp_path, monkeypatch):
+    """Un paramètre qui promet une sélection doit sélectionner.
+
+    Il ne faisait qu'une intersection avec les rapports bloqués : demander
+    ``shab_maquette`` produisait quand même tout le pack — une API publique qui
+    écrit plus que demandé.
+    """
+    res = _generer(tmp_path, monkeypatch, reports=["shab_maquette"])
+    assert res.get("status") != "error", res
+    noms = [p.rsplit("/", 1)[-1] for p in res["paths"]]
+    assert any("export SHAB maquette" in n for n in noms), noms
+    # Le .docx consolidé reste produit : c'est lui qui porte l'analyse.
+    assert any(n.endswith(".docx") for n in noms), noms
+    # …et AUCUNE autre annexe.
+    for absent in ("Contrôle Maquettes", "Export Zones et Espaces", "surface enveloppe"):
+        assert not any(absent in n for n in noms), f"{absent} écrit sans être demandé : {noms}"
+
+
+def test_reports_refuse_une_cle_inconnue_avant_ecriture(tmp_path, monkeypatch):
+    """Une faute de frappe qui produirait silencieusement autre chose que ce
+    qui est demandé est pire qu'une erreur."""
+    res = _generer(tmp_path, monkeypatch, reports=["typo"])
+    assert res["status"] == "error"
+    assert res["error"] == "unknown_report"
+    assert res["unknown_reports"] == ["typo"]
+    assert "plancher" in res["known_reports"]
+    assert not (tmp_path / "pack").exists(), "un dossier a été créé malgré le refus"
+
+
+def test_reports_refuse_une_cle_bloquee_meme_accompagnee(tmp_path, monkeypatch):
+    """Un rapport bloqué contamine toute la demande : on ne produit pas
+    « la partie faisable » en silence."""
+    res = _generer(tmp_path, monkeypatch, reports=["shab_maquette", _CLE])
+    assert res["status"] == "error"
+    assert res["error"] == "report_blocked"
+    assert list(res["blocked_reports"]) == [_CLE]
+    assert not (tmp_path / "pack").exists()
+
+
+def test_reports_none_produit_tout_ce_qui_est_produisible(tmp_path, monkeypatch):
+    """Contre-épreuve : sans sélection, la garde ne doit rien retirer d'autre
+    que les rapports bloqués."""
+    res = _generer(tmp_path, monkeypatch)
+    assert res.get("status") != "error", res
+    noms = [p.rsplit("/", 1)[-1] for p in res["paths"]]
+    for attendu in (
+        "Contrôle Maquettes",
+        "export SHAB maquette",
+        "Export Zones et Espaces",
+        "surface enveloppe",
+        "export Menuiseries",
+    ):
+        assert any(attendu in n for n in noms), f"{attendu} manquant : {noms}"
+    assert not any("plancher" in n.lower() for n in noms)

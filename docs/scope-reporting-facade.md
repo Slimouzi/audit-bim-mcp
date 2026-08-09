@@ -6,7 +6,7 @@ Ce document existe pour qu'on ne nettoie pas `reporting` au jugé.
 ## Le constat qui change la nature du lot
 
 `audit_bim/query` était une façade : 152 lignes de pur passe-plat, supprimées
-sans conséquence. **`reporting` n'en est pas une.** 23 modules, **8 986 lignes**,
+sans conséquence. **`reporting` n'en est pas une.** 23 modules, **9 026 lignes**,
 dont **5 016 dans dix modules qui écrivent un fichier**.
 
 | Nature | Modules | Lignes |
@@ -14,7 +14,7 @@ dont **5 016 dans dix modules qui écrivent un fichier**.
 | Façade pure vers `bim-reporting` | 0 | — |
 | Sans attache directe mesurée | 2 | 7 |
 | Lié au livrable I3F par ses appelants | 9 | 2 812 |
-| Orchestration I3F | 12 | **6 167** |
+| Orchestration I3F | 12 | **6 207** |
 
 **Aucune catégorie ne s'appelle « neutre »**, et c'est délibéré. Le mot serait lu
 comme « extractible » par le lot suivant, alors que la mesure ne dit que « aucune
@@ -106,7 +106,7 @@ Dix modules écrivent. Trois contrats, de nature différente :
 |---|---|---|
 | **Rapport Word** | `word_report.py` | ordre des sections, textes du profil, déterminisme (corrigé en #160) |
 | **Annexe XLSX** | `xlsx_annex.py` | **noms d'onglets et en-têtes** — clés techniques, pas du texte |
-| **Pack AVP** | `avp/pack.py` + 8 modules | six annexes, un rapport Word, et la note de méthode |
+| **Pack AVP** | `avp/pack.py` + 8 modules | les annexes **produisibles** (cinq aujourd'hui : Plancher est bloqué faute de règle métier), un rapport Word, et la note de méthode |
 
 Le deuxième mérite une insistance. `ReportStructureSpec` porte
 `referential_sheet_name` et `finding_reference_column_label` comme **valeurs
