@@ -69,7 +69,14 @@ def test_build_plancher_from_snapshot_lists_slabs():
     # Multi-onglets comme le classeur MOA : détail « Dalles Ok » + synthèse « Planchers ».
     src = build_plancher_from_snapshot(_snap_with_slabs())
     assert src is not None
-    assert [g.title for g in src.grids] == ["TDB 2022 xx.2 - Dalles Ok", "Planchers"]
+    # Plus une « Note de méthode » : le gabarit porte un total « Surface de
+    # plancher » calculé sur une sélection métier des types de dalles, que la
+    # maquette ne permet pas de reproduire. On dit pourquoi ce total manque.
+    assert [g.title for g in src.grids] == [
+        "TDB 2022 xx.2 - Dalles Ok",
+        "Planchers",
+        "Note de méthode",
+    ]
     rows = src.grids[0].rows
     names = [r[1] for r in rows]
     assert "Dalle RDC" in names and "Dalle R+1" in names

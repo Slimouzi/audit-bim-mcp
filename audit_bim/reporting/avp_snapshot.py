@@ -1192,6 +1192,80 @@ def build_enveloppe_from_snapshot(snap: ModelSnapshot) -> EnveloppeSource | None
 _SLAB_CLASSES = ("IfcSlab", "IfcCovering")
 _SLAB_BQ_ORDER = ("NetArea", "GrossArea", "NetSideArea")
 
+#: Propriétés ArchiCAD portant le **composite** d'une dalle (« Béton »,
+#: « DI 10+23+6+5+2 : Flocage + Béton +Isolant + Chape + Carrelage »). C'est de
+#: là que vient la colonne « Type » du gabarit : l'``ObjectType`` IFC est nul
+#: sur les 116 dalles de la maquette de recette, et le ``Name`` vaut « Dalle »
+#: pour 97 d'entre elles — les lire écrasait 49 types en 5 lignes inutilisables.
+_SLAB_COMPOSITE_PROPS = (
+    "Matériau de construction / Composite / Profil / Hachure",
+    "Matériau de construction",
+)
+#: Épaisseur, en mètres, à joindre au composite : le gabarit écrit
+#: « Béton 300 », soit le composite suivi de l'épaisseur **en millimètres**.
+_SLAB_THICKNESS_PROPS = ("Width", "Épaisseur")
+
+
+def _slab_type_label(el: dict) -> str:
+    """Type métier d'une dalle : « <composite> <épaisseur en mm> ».
+
+    Reconstruction vérifiée : appliquée aux 116 dalles de
+    ``250613_MN_BAT (2).ifc``, elle retrouve **exactement** les 49 couples
+    (Type, Étage) du gabarit ``260203 Tatare 0546L AVP - export plancher.xlsx`` —
+    aucun manquant, aucun en trop.
+    """
+    composite = ""
+    for nom in _SLAB_COMPOSITE_PROPS:
+        composite = _prop_texte_any_pset(el, nom)
+        if composite:
+            break
+    if not composite:
+        return _object_type_or_name(el)
+    epaisseur = _base_quantity_ordered(el, ("Width",))
+    if epaisseur is None:
+        epaisseur = _prop_any_pset(el, "Épaisseur")
+    return f"{composite} {round(epaisseur * 1000)}" if epaisseur is not None else composite
+
+
+def _prop_texte_any_pset(el: dict, prop_name: str) -> str:
+    """Valeur **texte** d'une propriété cherchée dans tous les Psets.
+
+    Pendant textuel de :func:`_prop_any_pset`, qui n'accepte que du numérique.
+    """
+    cible = _norm(prop_name)
+    for pset in el.get("property_sets") or []:
+        for prop in pset.get("properties") or []:
+            if _norm((prop.get("definition") or {}).get("name")) == cible:
+                valeur = prop.get("value")
+                if isinstance(valeur, str) and valeur.strip():
+                    return valeur.strip()
+    return ""
+
+
+def _storey_by_element(snap: ModelSnapshot) -> dict[str, str]:
+    """``element_uuid → nom d'étage``, depuis ``structure_tree``.
+
+    :func:`_walk_structure_tree` ne retient que les ``IfcSpace`` ; les dalles
+    ont le même besoin et la même source. Sans elle, ``_storey(el)`` ne lit que
+    des attributs plats, absents des charges utiles réelles : la colonne Étage
+    du livrable Plancher sortait vide sur 116 dalles qui portent pourtant toutes
+    leur étage dans l'arbre.
+    """
+    out: dict[str, str] = {}
+
+    def visit(node: dict, storey: str | None) -> None:
+        if _node_kind(node) == "storey":
+            storey = node.get("name") or node.get("long_name") or storey
+        uuid = node.get("uuid")
+        if uuid and storey and uuid not in out:
+            out[uuid] = storey
+        for child in node.get("children") or []:
+            visit(child, storey)
+
+    for root in snap.structure_tree or []:
+        visit(root, None)
+    return out
+
 
 def count_planchers(snap: ModelSnapshot | None) -> int:
     """Nombre de dalles/planchers exploitables (IfcSlab, repli IfcCovering)."""
@@ -1200,26 +1274,78 @@ def count_planchers(snap: ModelSnapshot | None) -> int:
     return sum(len(snap.of_class(cls)) for cls in _SLAB_CLASSES)
 
 
+def _note_methode_plancher(groups: dict[tuple[str, str, str], dict[str, Any]]) -> list[list[Any]]:
+    """Trace ce que le livrable Plancher **ne dit pas**, et pourquoi.
+
+    Le gabarit client porte, sous sa synthèse, un total ``Surface de plancher :``
+    ``=SUM(D2:D21)``. Mais sa synthèse ne retient que **19 des 49** groupes de
+    dalles : les types qui constituent réellement le plancher, à l'exclusion des
+    toitures zinc, des faux plafonds BA13, des dalles extérieures et des
+    complexes d'isolation. Cette sélection est un **arbitrage métier** ; aucune
+    donnée de la maquette ne la porte.
+
+    Totaliser nos dalles sous ce libellé afficherait donc une « surface de
+    plancher » qui n'en est pas une — la même erreur que le pivot Zones/Espaces
+    qui totalisait annexes et espaces non zonés. On ne produit pas ce total, et
+    on dit ici pourquoi plutôt que de laisser croire à un oubli.
+    """
+    total_dalles = sum((_num(e["area"]) or 0.0) for e in groups.values() if e.get("found"))
+    return [
+        ["Note de méthode"],
+        [],
+        [
+            "Ce livrable ne porte pas de total « Surface de plancher ». Le "
+            "gabarit client le calcule sur une sélection des types de dalles "
+            "qui constituent le plancher ; cette sélection est un arbitrage "
+            "métier qu'aucune donnée de la maquette ne permet de reproduire."
+        ],
+        ["groupes_de_dalles", len(groups)],
+        ["surface_toutes_dalles_m2", _round2(total_dalles)],
+        [
+            "Le chiffre ci-dessus totalise TOUTES les dalles du modèle "
+            "(toitures, faux plafonds et dalles extérieures comprises) : ce "
+            "n'est pas une surface de plancher."
+        ],
+        [],
+        [
+            "Une quantité est native (BaseQuantities) OU calculée par IFC "
+            "OpenShell, jamais les deux : une seule des deux colonnes de "
+            "mesure est renseignée par ligne, et la colonne d'écart reste donc "
+            "vide tant qu'une seule source alimente le livrable."
+        ],
+    ]
+
+
 def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None:
-    """Export plancher MOA depuis la maquette : détail + synthèse écarts."""
+    """Export plancher MOA depuis la maquette : détail + synthèse écarts.
+
+    Le regroupement se fait sur (composant, **type de composite**, **étage**).
+    Lus sur les attributs IFC plats, ces deux derniers étaient vides ou
+    constants — 49 groupes du gabarit s'effondraient en 5 lignes qui ne
+    disaient plus rien. Ils vivent respectivement dans les propriétés ArchiCAD
+    et dans ``structure_tree``.
+    """
     slabs = [el for cls in _SLAB_CLASSES for el in snap.of_class(cls)]
     if not slabs:
         return None
-    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
+    etage_par_uuid = _storey_by_element(snap)
+    groups: dict[tuple[str, str, str, bool], dict[str, Any]] = {}
     for item in slabs:
         el = _rich(snap, item)
-        surf, src = _surface_with_source(el, _SLAB_BQ_ORDER)
-        key = (_ifc_component_label(el.get("type")), _object_type_or_name(el), _storey(el))
-        entry = groups.setdefault(
-            key,
-            {"area": 0.0, "found": False, "count": 0, "computed": False},
-        )
+        surf, _src = _surface_with_source(el, _SLAB_BQ_ORDER)
+        etage = _storey(el) or etage_par_uuid.get(el.get("uuid"), "")
+        # La PROVENANCE entre dans la clé de regroupement (même règle qu'aux
+        # Fenêtres, #210). Sans elle, un seul élément calculé faisait basculer
+        # toute la ligne en colonne IFC OpenShell — y compris les dalles
+        # natives qu'elle comptait : le livrable annonçait alors une provenance
+        # fausse pour une partie de la surface affichée.
+        calculee = bool(_computed_qty_names(el) & set(_SLAB_BQ_ORDER))
+        key = (_ifc_component_label(el.get("type")), _slab_type_label(el), etage, calculee)
+        entry = groups.setdefault(key, {"area": 0.0, "found": False, "count": 0})
         entry["count"] += 1
         if surf is not None:
             entry["area"] += surf
             entry["found"] = True
-        if _computed_qty_names(el) & set(_SLAB_BQ_ORDER):
-            entry["computed"] = True
 
     detail_rows: list[list[Any]] = [
         [
@@ -1230,7 +1356,6 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
             "Surface IFC OpenShell",
             "Nombre",
             "Couleur",
-            "Source quantité",
         ]
     ]
     summary_rows: list[list[Any]] = [
@@ -1240,39 +1365,42 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
             "Étage",
             "BaseQuantities.NetArea",
             "Surface IFC OpenShell",
-            "Ecart",
+            "Ecart BaseQuantities / IFC OpenShell",
             "Nombre",
             "Couleur",
-            "Source quantité",
         ]
     ]
     for key, entry in sorted(groups.items()):
-        component, typ, storey = key
+        component, typ, storey, calculee = key
         area = _round2(entry["area"]) if entry["found"] else None
-        source = (
-            _SRC_COMPUTED
-            if entry["computed"]
-            else (_SRC_MODEL if entry["found"] else NOT_AVAILABLE)
-        )
-        detail_rows.append([component, typ, storey, area, area, entry["count"], "", source])
+        # La provenance décide de la COLONNE, elle ne se répète pas en bout de
+        # ligne. D et E recevaient LITTÉRALEMENT la même variable ``area`` :
+        # l'écart F était vide par construction et se lisait comme une
+        # concordance vérifiée alors que rien ne l'avait été.
+        natif = None if calculee else area
+        openshell = area if calculee else None
+        detail_rows.append([component, typ, storey, natif, openshell, entry["count"], ""])
         excel_row = len(summary_rows) + 1
         summary_rows.append(
             [
                 component,
                 typ,
                 storey,
-                area,
-                area,
-                f'=IF(E{excel_row}-D{excel_row}=0,"",E{excel_row}/D{excel_row}-1)',
+                natif,
+                openshell,
+                # Forme relative du gabarit, gardée : sans les deux valeurs il
+                # n'y a pas d'écart à afficher, et ``E/D-1`` donnerait #DIV/0!.
+                f'=IF(OR(D{excel_row}="",E{excel_row}=""),"",'
+                f'IF(E{excel_row}-D{excel_row}=0,"",E{excel_row}/D{excel_row}-1))',
                 entry["count"],
                 "",
-                source,
             ]
         )
     return MultiSheetSource(
         grids=[
             SheetGrid(title="TDB 2022 xx.2 - Dalles Ok", rows=detail_rows),
             SheetGrid(title="Planchers", rows=summary_rows),
+            SheetGrid(title="Note de méthode", rows=_note_methode_plancher(groups)),
         ]
     )
 
