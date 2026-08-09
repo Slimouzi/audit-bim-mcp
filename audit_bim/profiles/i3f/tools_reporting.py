@@ -1183,32 +1183,40 @@ def generate_avp_i3f_pack(
     try:
         _normalize_report_selection(reports)
     except AvpReportSelectionError as refus:
+        # Les deux motifs sont RENDUS ENSEMBLE quand ils coexistent. Sortir sur
+        # le premier ferait corriger une typo pour découvrir ensuite qu'un
+        # rapport est bloqué : un aller-retour que l'exception, elle, avait déjà
+        # évité côté cœur.
+        motifs: list[str] = []
+        etapes: list[str] = []
+        payload: dict = {"status": "error"}
         if refus.unknown:
-            return {
-                "status": "error",
-                "error": "unknown_report",
-                "unknown_reports": list(refus.unknown),
-                "known_reports": list(refus.known),
-                "message": (
-                    "Clé(s) de rapport inconnue(s) : "
-                    + ", ".join(refus.unknown)
-                    + ". Aucun fichier n'a été écrit."
-                ),
-                "next_step": "Utiliser les clés de ``list_avp_i3f_xls_reports``.",
-            }
-        return {
-            "status": "error",
-            "error": "report_blocked",
-            "blocked_reports": dict(refus.blocked),
-            "message": (
-                "Rapport(s) non produisibles : "
+            payload["unknown_reports"] = list(refus.unknown)
+            payload["known_reports"] = list(refus.known)
+            motifs.append("clé(s) de rapport inconnue(s) : " + ", ".join(refus.unknown))
+            etapes.append("utiliser les clés de ``list_avp_i3f_xls_reports``")
+        if refus.blocked:
+            payload["blocked_reports"] = dict(refus.blocked)
+            motifs.append(
+                "rapport(s) non produisibles : "
                 + ", ".join(f"{c} — {m}" for c, m in sorted(refus.blocked.items()))
-            ),
-            "next_step": (
-                "Retirer ce(s) rapport(s) de ``reports``, ou définir la règle "
-                "métier manquante. Aucun fichier n'a été écrit."
-            ),
-        }
+            )
+            etapes.append(
+                "retirer ce(s) rapport(s) de ``reports``, ou définir la règle métier manquante"
+            )
+        # Un code par cause tant qu'il n'y en a qu'une ; le code générique dès
+        # qu'il y en a deux — nommer l'une des deux masquerait l'autre.
+        if refus.unknown and refus.blocked:
+            payload["error"] = "invalid_report_selection"
+        elif refus.unknown:
+            payload["error"] = "unknown_report"
+        else:
+            payload["error"] = "report_blocked"
+        # Les motifs peuvent déjà se terminer par un point (le motif de blocage
+        # est une phrase) : ne pas en ajouter un second.
+        payload["message"] = " ; ".join(motifs).rstrip(". ") + ". Aucun fichier n'a été écrit."
+        payload["next_step"] = " ; ".join(etapes).capitalize() + "."
+        return payload
     selection = None if reports is None else list(dict.fromkeys(reports))
 
     context = _validate_avp_context(
