@@ -308,3 +308,36 @@ def test_reports_none_produit_tout_ce_qui_est_produisible(tmp_path, monkeypatch)
     ):
         assert any(attendu in n for n in noms), f"{attendu} manquant : {noms}"
     assert not any("plancher" in n.lower() for n in noms)
+
+
+def test_deux_motifs_a_la_fois_sont_tous_deux_rendus_au_client(tmp_path, monkeypatch):
+    """Le cœur cumulait déjà les deux motifs ; la traduction MCP sortait sur le
+    premier et perdait le second.
+
+    L'utilisateur corrigeait donc sa typo pour découvrir ensuite qu'un rapport
+    est bloqué — l'aller-retour que l'exception interne évitait déjà. Le code
+    devient générique quand il y a deux causes : nommer l'une masquerait l'autre.
+    """
+    res = _generer(tmp_path, monkeypatch, reports=["typo", _CLE])
+
+    assert res["status"] == "error"
+    assert res["error"] == "invalid_report_selection"
+    assert res["unknown_reports"] == ["typo"]
+    assert _CLE in res["known_reports"]
+    assert _CLE in res["blocked_reports"]
+    assert "règle métier" in res["blocked_reports"][_CLE]
+    # Le message porte les deux, pas seulement le premier rencontré.
+    assert "typo" in res["message"] and _CLE in res["message"]
+    assert not (tmp_path / "pack").exists()
+
+
+def test_un_seul_motif_garde_son_code_specifique(tmp_path, monkeypatch):
+    """Contre-épreuve : le code générique ne doit pas avaler les cas simples,
+    qui portent l'information la plus utile."""
+    inconnue = _generer(tmp_path, monkeypatch, reports=["typo"])
+    assert inconnue["error"] == "unknown_report"
+    assert "blocked_reports" not in inconnue
+
+    bloque = _generer(tmp_path, monkeypatch, reports=[_CLE])
+    assert bloque["error"] == "report_blocked"
+    assert "unknown_reports" not in bloque

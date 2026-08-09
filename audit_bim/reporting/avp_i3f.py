@@ -1,15 +1,23 @@
 """Pack de livrables AVP I3F (Tarare 0546L) — génération BIMData.
 
 Produit, à partir d'un ``AuditResult`` (snapshot/audit BIMData) et des
-quantités IFC extraites/calculées depuis la maquette, le pack de livrables AVP :
+quantités IFC extraites/calculées depuis la maquette, le pack des livrables AVP
+**produisibles** :
 
 1. ``… Contrôle Maquettes.xlsx`` — grille de contrôle + stats conformité.
 2. ``… AVP - export SHAB maquette.xlsx``.
 3. ``… Export Zones et Espaces.xlsx``.
 4. ``… Extraction surface enveloppe.xlsx`` (+ ratio FAC/SHAB, Seuil 3F).
 5. ``… export Menuiseries.xlsx``.
-6. ``… export plancher.xlsx``.
-7. ``… Rapport analyse BIM.docx`` (+ ``.pdf`` best-effort) — rapport consolidé.
+6. ``… Rapport analyse BIM.docx`` (+ ``.pdf`` best-effort) — rapport consolidé,
+   **toujours** produit : c'est lui qui porte l'analyse.
+
+``… export plancher.xlsx`` n'est **plus produit** : le rapport est bloqué tant
+que la règle métier de sélection des 19 groupes contribuant à la Surface de
+plancher n'est pas définie (``ReportSpec.blocked_reason``). Le paramètre
+``reports`` restreint en outre l'écriture aux clés catalogue nommées ; une clé
+inconnue ou bloquée fait lever ``AvpReportSelectionError`` **avant** toute
+écriture.
 
 Principes :
 
@@ -33,7 +41,12 @@ compatibilité de tous les imports historiques.
 
 from __future__ import annotations
 
-from .avp.models import AvpMeta, AvpQaError, AvpReportPack  # noqa: F401
+from .avp.models import (  # noqa: F401
+    AvpMeta,
+    AvpQaError,
+    AvpReportPack,
+    AvpReportSelectionError,
+)
 from .avp.pack import write_avp_i3f_report_pack  # noqa: F401
 from .avp.xlsx_common import _count_business_rows  # noqa: F401
 from .avp.xlsx_controle import (  # noqa: F401
@@ -50,6 +63,7 @@ __all__ = [
     "AvpMeta",
     "AvpQaError",
     "AvpReportPack",
+    "AvpReportSelectionError",
     "_audit_stats",
     "_build_enveloppe_xlsx",
     "_count_business_rows",

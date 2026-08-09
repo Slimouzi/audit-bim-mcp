@@ -1173,48 +1173,51 @@ def generate_avp_i3f_pack(
         ``{output_dir, paths, analyse_docx, analyse_pdf, pdf_available}`` ou
         ``{status: needs_context, missing, questions}``.
     """
-    from ...reporting.avp_report_catalog import REPORT_SPECS_BY_KEY
+    # La règle de sélection vit dans le CŒUR : ce tool ne fait que traduire son
+    # refus en payload MCP. Deux copies auraient divergé — c'est exactement ce
+    # qui s'est produit quand le tool validait pendant que le cœur ignorait.
+    from ...reporting.avp.models import AvpReportSelectionError
+    from ...reporting.avp.pack import _normalize_report_selection
     from ...reporting.avp_sources import AvpSourcePaths, load_sources, read_envelope_json
 
-    # Validation de la SÉLECTION, avant toute écriture. Une clé inconnue est
-    # refusée plutôt qu'ignorée : une faute de frappe qui produirait
-    # silencieusement autre chose que ce qui est demandé est pire qu'une erreur.
-    bloques = {
-        cle: spec.blocked_reason
-        for cle, spec in REPORT_SPECS_BY_KEY.items()
-        if spec.blocked_reason is not None
-    }
+    try:
+        _normalize_report_selection(reports)
+    except AvpReportSelectionError as refus:
+        # Les deux motifs sont RENDUS ENSEMBLE quand ils coexistent. Sortir sur
+        # le premier ferait corriger une typo pour découvrir ensuite qu'un
+        # rapport est bloqué : un aller-retour que l'exception, elle, avait déjà
+        # évité côté cœur.
+        motifs: list[str] = []
+        etapes: list[str] = []
+        payload: dict = {"status": "error"}
+        if refus.unknown:
+            payload["unknown_reports"] = list(refus.unknown)
+            payload["known_reports"] = list(refus.known)
+            motifs.append("clé(s) de rapport inconnue(s) : " + ", ".join(refus.unknown))
+            etapes.append("utiliser les clés de ``list_avp_i3f_xls_reports``")
+        if refus.blocked:
+            payload["blocked_reports"] = dict(refus.blocked)
+            motifs.append(
+                "rapport(s) non produisibles : "
+                + ", ".join(f"{c} — {m}" for c, m in sorted(refus.blocked.items()))
+            )
+            etapes.append(
+                "retirer ce(s) rapport(s) de ``reports``, ou définir la règle métier manquante"
+            )
+        # Un code par cause tant qu'il n'y en a qu'une ; le code générique dès
+        # qu'il y en a deux — nommer l'une des deux masquerait l'autre.
+        if refus.unknown and refus.blocked:
+            payload["error"] = "invalid_report_selection"
+        elif refus.unknown:
+            payload["error"] = "unknown_report"
+        else:
+            payload["error"] = "report_blocked"
+        # Les motifs peuvent déjà se terminer par un point (le motif de blocage
+        # est une phrase) : ne pas en ajouter un second.
+        payload["message"] = " ; ".join(motifs).rstrip(". ") + ". Aucun fichier n'a été écrit."
+        payload["next_step"] = " ; ".join(etapes).capitalize() + "."
+        return payload
     selection = None if reports is None else list(dict.fromkeys(reports))
-    if selection is not None:
-        inconnues = sorted(set(selection) - set(REPORT_SPECS_BY_KEY))
-        if inconnues:
-            return {
-                "status": "error",
-                "error": "unknown_report",
-                "unknown_reports": inconnues,
-                "known_reports": sorted(REPORT_SPECS_BY_KEY),
-                "message": (
-                    "Clé(s) de rapport inconnue(s) : "
-                    + ", ".join(inconnues)
-                    + ". Aucun fichier n'a été écrit."
-                ),
-                "next_step": "Utiliser les clés de ``list_avp_i3f_xls_reports``.",
-            }
-        demandes_bloques = sorted(set(selection) & set(bloques))
-        if demandes_bloques:
-            return {
-                "status": "error",
-                "error": "report_blocked",
-                "blocked_reports": {c: bloques[c] for c in demandes_bloques},
-                "message": (
-                    "Rapport(s) non produisibles : "
-                    + ", ".join(f"{c} — {bloques[c]}" for c in demandes_bloques)
-                ),
-                "next_step": (
-                    "Retirer ce(s) rapport(s) de ``reports``, ou définir la règle "
-                    "métier manquante. Aucun fichier n'a été écrit."
-                ),
-            }
 
     context = _validate_avp_context(
         controle_xlsx=controle_xlsx,

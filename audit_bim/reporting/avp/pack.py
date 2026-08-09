@@ -37,6 +37,7 @@ from .models import (
     AvpMeta,
     AvpQaError,
     AvpReportPack,
+    AvpReportSelectionError,
     _deliverable_filename,
 )
 from .xlsx_common import _count_business_rows
@@ -129,6 +130,49 @@ def _is_envelope_json_source(src) -> bool:
     table = getattr(src, "table", None)
     headers = getattr(table, "headers", None) or []
     return "Surface IFC OpenShell" in headers and "IFC OpenShell Surface des Fenêtres" in headers
+
+
+#: Correspondance clé catalogue → libellé employé par les gates QA, qui parlent
+#: la langue du livrable (« SHAB ») et non celle du catalogue (« shab_maquette »).
+_LIBELLE_QA_PAR_CLE = {
+    "controle_maquettes": "Contrôle",
+    "shab_maquette": "SHAB",
+    "zones_espaces": "Zones/Espaces",
+    "surface_enveloppe": "Enveloppe",
+    "menuiseries": "Menuiseries",
+    "plancher": "Plancher",
+}
+
+
+def _normalize_report_selection(reports) -> frozenset[str]:
+    """Sélection **normalisée** : dédupliquée, validée, réduite au produisible.
+
+    Un seul endroit décide de ce qui sera produit — et donc de ce qui doit être
+    contrôlé. Deux copies de cette règle diborderaient : la façade MCP refusait
+    les clés invalides pendant que le cœur les ignorait, et les gates QA
+    préflightaient des rapports que la sélection n'avait pas demandés.
+
+    ``None`` = tous les rapports non bloqués. Sinon la sélection est validée :
+    clé inconnue ou bloquée ⇒ :class:`AvpReportSelectionError`, levée **avant
+    toute écriture**.
+    """
+    produisibles = frozenset(
+        cle for cle, spec in REPORT_SPECS_BY_KEY.items() if spec.blocked_reason is None
+    )
+    if reports is None:
+        return produisibles
+    demandes = list(dict.fromkeys(reports))
+    inconnues = tuple(sorted(set(demandes) - set(REPORT_SPECS_BY_KEY)))
+    bloques = {
+        cle: REPORT_SPECS_BY_KEY[cle].blocked_reason
+        for cle in sorted(set(demandes) & set(REPORT_SPECS_BY_KEY))
+        if REPORT_SPECS_BY_KEY[cle].blocked_reason is not None
+    }
+    if inconnues or bloques:
+        raise AvpReportSelectionError(
+            unknown=inconnues, blocked=bloques, known=tuple(sorted(REPORT_SPECS_BY_KEY))
+        )
+    return frozenset(demandes)
 
 
 def write_avp_i3f_report_pack(
@@ -237,13 +281,19 @@ def write_avp_i3f_report_pack(
     # Dès qu'il existe, il devient la source autoritaire des exports métriques.
     snap = snapshot if snapshot is not None else (result.snapshot if result is not None else None)
 
+    # La sélection est normalisée AVANT tout préflight : elle décide de ce qui
+    # sera produit, donc de ce qui doit être contrôlé. Préflighter un rapport
+    # non demandé refuserait un pack pour un livrable qu'on n'écrit pas.
+    selection = _normalize_report_selection(reports)
+
     # ── PRÉFLIGHT : refuser AVANT d'écrire quoi que ce soit ─────────────
     # Les quantités manquantes se voient sur le snapshot, sans rien produire.
     # Contrôler après génération laisserait un dossier de livrables non
     # conformes sur disque malgré le statut d'erreur — le piège même que cette
     # gate doit fermer. Les gates qui nécessitent de LIRE les fichiers produits
     # (annexes vides) restent nécessairement en aval.
-    sans_quantites = _qa_missing_quantities(snap)
+    attendus = {_LIBELLE_QA_PAR_CLE[c] for c in selection}
+    sans_quantites = [x for x in _qa_missing_quantities(snap) if x in attendus]
     if sans_quantites:
         raise AvpQaError(sans_quantites, kind="missing_quantities")
 
@@ -273,19 +323,19 @@ def write_avp_i3f_report_pack(
     # I3F il compte des cloisons et des refends que le gabarit n'attend pas, et
     # rejette au passage des types d'enveloppe légitimes. Le livrable est alors
     # plausible ET faux — il ne se distingue qu'en le comparant au modèle.
-    mode_env = _qa_envelope_filter_mode(sources.enveloppe if sources else None)
+    mode_env = (
+        _qa_envelope_filter_mode(sources.enveloppe if sources else None)
+        if "surface_enveloppe" in selection
+        else None
+    )
     if mode_env == "geometric":
         raise AvpQaError(["Extraction surface enveloppe"], kind="envelope_filter_mode")
 
     out.mkdir(parents=True, exist_ok=True)
 
-    # Un rapport est produit s'il est DEMANDÉ **et** non bloqué. Bloqué → on
-    # n'écrit rien : un classeur dont la synthèse ne peut pas être juste ferait
-    # un quasi-livrable, plus difficile à réfuter qu'un refus clair.
+    # ``selection`` porte déjà la règle : demandé ET non bloqué.
     def _produit(cle: str) -> bool:
-        if REPORT_SPECS_BY_KEY[cle].blocked_reason is not None:
-            return False
-        return reports is None or cle in reports
+        return cle in selection
 
     controle = (
         _build_controle_maquettes_xlsx(out / fn_controle, result, sources, meta, snap)

@@ -143,6 +143,42 @@ class AvpReportPack:
         return out
 
 
+class AvpReportSelectionError(ValueError):
+    """Sélection de rapports invalide — refusée **avant toute écriture**.
+
+    Le contrat vit dans le cœur, pas dans la façade MCP : ``write_avp_i3f_report_pack``
+    est ré-exporté et appelé directement par des tests et des scripts. Valider
+    seulement côté tool laisserait le cœur accepter en silence une clé qui ne
+    produit rien.
+
+    - ``unknown`` — clés absentes du catalogue. Refusées plutôt qu'ignorées :
+      une faute de frappe qui produirait autre chose que ce qui est demandé est
+      pire qu'une erreur ;
+    - ``blocked`` — ``clé → motif`` métier. Demander nommément un rapport bloqué
+      mérite un refus explicite, pas une omission silencieuse.
+    """
+
+    def __init__(
+        self,
+        *,
+        unknown: tuple[str, ...] = (),
+        blocked: dict[str, str] | None = None,
+        known: tuple[str, ...] = (),
+    ) -> None:
+        self.unknown = tuple(unknown)
+        self.blocked = dict(blocked or {})
+        self.known = tuple(known)
+        details = []
+        if self.unknown:
+            details.append("clé(s) inconnue(s) : " + ", ".join(self.unknown))
+        if self.blocked:
+            details.append(
+                "rapport(s) bloqué(s) : "
+                + ", ".join(f"{c} — {m}" for c, m in sorted(self.blocked.items()))
+            )
+        super().__init__(" ; ".join(details) or "sélection de rapports invalide")
+
+
 class AvpQaError(RuntimeError):
     """Livrable(s) client inexploitable(s) alors que la maquette a des données.
 
