@@ -109,6 +109,11 @@ class MenuiseriesSource:
     table: SheetTable | None = None
     sheet_title: str | None = None  # nom d'onglet source (proximité I3F)
     nombre_types: int | None = None
+    # Notes de méthode écrites SOUS la table. Le gabarit A:N n'a qu'un onglet :
+    # une explication ne peut pas y prendre la forme d'un onglet dédié. Sert
+    # notamment à dire qu'un calcul existe mais a été jugé non comparable —
+    # sinon une colonne vide se lit comme une absence de calcul.
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass

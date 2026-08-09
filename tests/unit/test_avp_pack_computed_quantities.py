@@ -103,7 +103,7 @@ def _q(gid, cls, qto, name, value):
         "quantity": name,
         "value": value,
         "unit": "m2" if "Area" in name else "m",
-        "method": "geometry",
+        "method": "ifcopenshell_geometry",
         "status": "computed",
         "source": "computed_ifcopenshell",
     }
@@ -242,10 +242,12 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
     La provenance ne se lit plus dans une colonne « Source quantité » en bout
     de ligne — absente du gabarit client, elle en déformait le tableau — mais à
     **l'emplacement de la valeur** : ``Surface IFC OpenShell`` pour le calculé,
-    ``Surface Nette (Qté de Base)`` pour le natif, jamais les deux (doctrine
-    #210). L'exigence est inchangée : ce qui est interdit, c'est qu'une valeur
-    fusionnée sorte sans provenance — le symptôme d'origine (299 fois
-    « Information non disponible » dans cette colonne).
+    ``Surface Nette (Qté de Base)`` pour le natif. Les deux **peuvent
+    coexister** — c'est le cas recherché, celui qui rend l'écart exploitable.
+    Ce que ce corpus exerce est le *gap-fill* : aucune BaseQuantity native, donc
+    seule la colonne calculée se remplit. L'exigence est inchangée : ce qui est
+    interdit, c'est qu'une valeur fusionnée sorte sans provenance — le symptôme
+    d'origine (299 fois « Information non disponible » dans cette colonne).
     """
     sess, _ = session
     sess.snapshot = _snapshot_sans_quantites()
@@ -267,9 +269,9 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
         v_natif = ws.cell(ligne, col_natif).value
         if v_calc is None and v_natif is None:
             continue  # ligne de séparation / sous-total
-        assert (v_calc is None) != (v_natif is None), (
-            f"ligne {ligne} de {Path(chemin).name} : les deux colonnes de "
-            "mesure sont remplies, la provenance n'est plus lisible"
+        assert not (v_calc is not None and v_natif is not None and v_calc == v_natif), (
+            f"ligne {ligne} de {Path(chemin).name} : la même valeur dans les "
+            "deux colonnes de mesure ne compare rien"
         )
         calculees += v_calc is not None
         natives += v_natif is not None
@@ -284,7 +286,15 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
 
 
 def test_native_quantities_are_never_overwritten(session, tmp_path):
-    """Une BaseQuantity native BIMData prime sur la valeur calculée."""
+    """Une BaseQuantity native BIMData prime sur la valeur calculée.
+
+    *Gap-only* décide quelle valeur fait **autorité**, pas laquelle mérite
+    d'être retenue : la native reste dans le pset et dans sa colonne, et la
+    calculée est désormais **conservée à côté** pour alimenter la colonne
+    « IFC OpenShell ». C'est ce qui rend la comparaison possible — jusqu'ici la
+    valeur calculée était jetée dès qu'une native existait, donc la colonne de
+    comparaison sortait vide sur toute maquette portant ses BaseQuantities.
+    """
     sess, _ = session
     # La quantité native vit dans les DONNÉES du snapshot (ce que renvoie
     # BIMData), pas dans l'index : ``index()`` recopie les espaces
@@ -304,9 +314,25 @@ def test_native_quantities_are_never_overwritten(session, tmp_path):
     assert res["computed_quantities_coverage"]["n_gap_kept"] == 1
 
     chemin = next(p for p in res["paths"] if _cle(p) == "shab_xlsx")
-    nombres = _nombres(chemin)
-    assert any(abs(n - 99.9) < 0.01 for n in nombres), "la valeur native doit être conservée"
-    assert not any(abs(n - 24.5) < 0.01 for n in nombres), "la calculée ne doit pas l'écraser"
+    wb = openpyxl.load_workbook(chemin)
+    ws = next(wb[t] for t in wb.sheetnames if t.startswith("TDB 2022 01.3"))
+    entetes = [c.value for c in ws[1]]
+    col_natif = entetes.index("Surface Nette (Qté de Base)") + 1
+    col_calc = entetes.index("Surface IFC OpenShell") + 1
+    valeurs = [
+        (ws.cell(r, col_natif).value, ws.cell(r, col_calc).value) for r in range(2, ws.max_row + 1)
+    ]
+    # La native reste à SA place, la calculée n'y entre pas.
+    assert any(n is not None and abs(n - 99.9) < 0.01 for n, _ in valeurs), (
+        "la valeur native doit être conservée dans la colonne native"
+    )
+    assert not any(n is not None and abs(n - 24.5) < 0.01 for n, _ in valeurs), (
+        "la calculée ne doit pas écraser la native"
+    )
+    # …et elle est visible en face, ce qui rend l'écart comparable.
+    assert any(c is not None and abs(c - 24.5) < 0.01 for _, c in valeurs), (
+        "la valeur calculée doit alimenter la colonne « Surface IFC OpenShell »"
+    )
 
 
 def test_unknown_schema_is_refused_before_generating(session, tmp_path):

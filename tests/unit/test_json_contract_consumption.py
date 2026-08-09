@@ -105,7 +105,7 @@ def _v1_quantities_document() -> dict:
                 "quantity": "NetFloorArea",
                 "value": 12.98,
                 "unit": "m2",
-                "method": "geometry",
+                "method": "ifcopenshell_geometry",
                 "status": "computed",
                 "source": "computed_ifcopenshell",
             }

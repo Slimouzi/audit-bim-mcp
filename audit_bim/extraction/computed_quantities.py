@@ -12,6 +12,21 @@ dans le snapshot BIMData courant, en **gap-only** :
 - **provenance par valeur** conservée sur l'élément (``computed_base_quantities``)
   : ``source="computed_ifcopenshell"``, ``method``, ``unit``, ``status``.
 
+Deux traces distinctes, à ne pas confondre :
+
+- ``computed_base_quantities`` — les quantités **effectivement fusionnées**.
+  Elle répond à « cette BaseQuantity du pset vient-elle d'un calcul ? », et
+  c'est elle qui décide dans quelle colonne un livrable écrit sa valeur ;
+- ``computed_comparison_quantities`` — **toutes** les quantités calculées,
+  fusionnées ou non. Elle répond à « que vaut le calcul IFC OpenShell pour cet
+  élément ? », indépendamment de ce que porte la maquette.
+
+La seconde existe parce que *gap-only* décide quelle valeur fait **autorité**,
+pas laquelle mérite d'être **retenue**. Jeter la valeur calculée dès qu'une
+native existait rendait toute comparaison impossible par construction : sur une
+maquette portant ses BaseQuantities — le cas courant — les colonnes « IFC
+OpenShell » des livrables sortaient vides, et les colonnes d'écart avec elles.
+
 La valeur calculée est injectée dans les ``property_sets`` de l'élément (pset
 ``Qto_*BaseQuantities``) → lue **à l'identique** par les builders AVP
 (``_base_quantity_ordered``) et par ``bim_object_from_element``
@@ -112,22 +127,31 @@ def merge_into_snapshot(snapshot, doc: dict[str, Any]) -> dict[str, Any]:
             continue
         qty = q.get("quantity")
         qto = q.get("qto") or "Qto_BaseQuantities"
+        trace = {
+            "quantity": qty,
+            "qto": qto,
+            "value": float(q["value"]),
+            "unit": q.get("unit"),
+            "method": q.get("method"),
+            "status": q.get("status"),
+            "source": q.get("source") or SOURCE_COMPUTED,
+        }
+        # La valeur calculée est TOUJOURS conservée comme donnée de comparaison,
+        # qu'elle ait été fusionnée ou écartée. C'est ce qui rend une vraie
+        # comparaison possible : jusqu'ici, un ``continue`` la jetait dès qu'une
+        # native existait, si bien que les colonnes « IFC OpenShell » des
+        # livrables étaient vides par construction sur toute maquette portant
+        # ses BaseQuantities.
+        element.setdefault("computed_comparison_quantities", []).append(dict(trace))
         if _has_quantity(element, qty):
             n_gap_kept += 1  # valeur BIMData existante → jamais écrasée
             continue
         _inject(element, qto, qty, q["value"])
-        prov = element.setdefault("computed_base_quantities", [])
-        prov.append(
-            {
-                "quantity": qty,
-                "qto": qto,
-                "value": float(q["value"]),
-                "unit": q.get("unit"),
-                "method": q.get("method"),
-                "status": q.get("status"),
-                "source": q.get("source") or SOURCE_COMPUTED,
-            }
-        )
+        # ``computed_base_quantities`` reste la trace de la FUSION : elle dit
+        # « cette BaseQuantity du pset vient d'un calcul ». Les provenances
+        # livrées en #210/#211/#212 la lisent — l'élargir ferait passer pour
+        # calculées des quantités natives.
+        element.setdefault("computed_base_quantities", []).append(trace)
         n_merged += 1
 
     return {

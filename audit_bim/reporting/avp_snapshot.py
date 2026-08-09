@@ -266,43 +266,65 @@ def count_menuiseries(snap: ModelSnapshot | None) -> int:
 # quantité attendue — et non le symptôme dans le fichier produit.
 
 
+def quantite_affichable(el: dict, valeur: float | None, qty_names: tuple[str, ...]) -> bool:
+    """Cette quantité atteindra-t-elle une cellule du livrable ?
+
+    **Une valeur non comparable peut être tracée et expliquée, mais elle ne doit
+    jamais satisfaire une condition de génération.** La fusion injecte la valeur
+    calculée dans le pset quand la native manque ; ``_base_quantity_ordered`` la
+    lit donc comme n'importe quelle autre, et la porte QA la comptait — alors
+    que le writer l'écarte ensuite si sa méthode n'est pas comparable. Résultat
+    mesuré : QA débloquée, puis une ligne de menuiserie dont **toutes** les
+    colonnes de mesure sont vides. Exactement le livrable que la gate
+    ``missing_quantities`` existe pour empêcher.
+
+    La porte et le writer passent désormais par la MÊME règle
+    (:func:`_mesures_natif_et_calcule`) : ce qui ne s'affiche pas ne débloque
+    rien.
+    """
+    natif, calcule = _mesures_natif_et_calcule(el, valeur, qty_names)
+    return natif is not None or calcule is not None
+
+
 def count_spaces_with_area(snap: ModelSnapshot | None) -> int:
-    """Espaces portant une surface exploitable (BaseQuantities ou repli)."""
+    """Espaces portant une surface **affichable** (BaseQuantities ou repli)."""
     if snap is None:
         return 0
     n = 0
     for item in snap.spaces or []:
-        surface, _src = _surface_with_source(_rich(snap, item), _SPACE_BQ_ORDER)
-        if surface is not None:
+        el = _rich(snap, item)
+        surface, _src = _surface_with_source(el, _SPACE_BQ_ORDER)
+        if quantite_affichable(el, surface, _SPACE_BQ_ORDER):
             n += 1
     return n
 
 
 def count_menuiseries_with_dimensions(snap: ModelSnapshot | None) -> int:
-    """Menuiseries portant une largeur **ou** une hauteur exploitable."""
+    """Menuiseries portant une largeur **ou** une hauteur **affichable**."""
     if snap is None:
         return 0
     n = 0
     for cls in _MENUISERIE_CLASSES:
         for item in snap.of_class(cls):
             el = _rich(snap, item)
-            if (
-                _base_quantity_ordered(el, ("Width", "OverallWidth")) is not None
-                or _base_quantity_ordered(el, ("Height", "OverallHeight")) is not None
-            ):
+            largeur = ("Width", "OverallWidth")
+            hauteur = ("Height", "OverallHeight")
+            if quantite_affichable(
+                el, _base_quantity_ordered(el, largeur), largeur
+            ) or quantite_affichable(el, _base_quantity_ordered(el, hauteur), hauteur):
                 n += 1
     return n
 
 
 def count_planchers_with_area(snap: ModelSnapshot | None) -> int:
-    """Dalles portant une aire exploitable (``NetArea`` et replis)."""
+    """Dalles portant une aire **affichable** (``NetArea`` et replis)."""
     if snap is None:
         return 0
     n = 0
     for cls in _SLAB_CLASSES:
         for item in snap.of_class(cls):
             el = _rich(snap, item)
-            if _base_quantity_ordered(el, _SLAB_BQ_ORDER) is not None:
+            if quantite_affichable(el, _base_quantity_ordered(el, _SLAB_BQ_ORDER), _SLAB_BQ_ORDER):
                 n += 1
     return n
 
@@ -649,9 +671,110 @@ def _object_type_or_name(el: dict) -> str:
 
 
 def _computed_qty_names(el: dict) -> set[str]:
-    """Noms des BaseQuantities issues de la fusion géométrique (Lot 3)."""
+    """Noms des BaseQuantities issues de la fusion géométrique (Lot 3).
+
+    Trace de la **fusion** : ces quantités-là sont dans le pset parce qu'un
+    calcul les y a mises. À ne pas confondre avec
+    :func:`_comparison_quantity`, qui donne la valeur calculée même quand la
+    maquette portait déjà la sienne.
+    """
     return {
         c.get("quantity") for c in (el.get("computed_base_quantities") or []) if c.get("quantity")
+    }
+
+
+#: Méthodes de calcul dont la valeur est **comparable** à une BaseQuantity
+#: native. Liste blanche assumée : une méthode inconnue n'est PAS comparable.
+#:
+#: ``ifcopenshell_geometry`` mesure la grandeur elle-même — surface d'espace,
+#: aire de dalle. Écarts constatés sur la maquette de recette : ≤ 1,3 % pour les
+#: espaces, 0 % pour les dalles.
+#:
+#: ``ifcopenshell_bbox`` mesure une **boîte englobante**. Confrontée à la largeur
+#: NOMINALE d'une menuiserie, elle donne 1,519 contre 1,4 — jusqu'à +83 % d'écart
+#: sur la maquette réelle. Ce n'est pas un défaut de maquette : ce sont deux
+#: grandeurs différentes. Afficher cet écart produirait exactement ce que la
+#: doctrine interdit — une colonne qui ressemble à un contrôle vérifié.
+_METHODES_COMPARABLES = ("ifcopenshell_geometry",)
+
+
+def _methode_comparable(methode: str | None) -> bool:
+    return (methode or "") in _METHODES_COMPARABLES
+
+
+def _comparison_quantity(el: dict, qty_names: tuple[str, ...]) -> tuple[float | None, str | None]:
+    """Valeur **calculée** et sa **méthode**, dans l'ordre de ``qty_names``.
+
+    Lue sur ``computed_comparison_quantities``, qui conserve le calcul qu'il ait
+    été fusionné ou écarté. La méthode remonte avec la valeur : sans elle, le
+    reporting ne peut pas distinguer une mesure de la grandeur d'une mesure de
+    sa boîte englobante, et affiche les deux comme si elles étaient comparables.
+    """
+    par_nom = {
+        c.get("quantity"): (_num(c.get("value")), c.get("method"))
+        for c in (el.get("computed_comparison_quantities") or [])
+        if c.get("quantity")
+    }
+    for nom in qty_names:
+        valeur, methode = par_nom.get(nom, (None, None))
+        if valeur is not None:
+            return valeur, methode
+    return None, None
+
+
+def _mesures_natif_et_calcule(
+    el: dict, valeur: float | None, qty_names: tuple[str, ...]
+) -> tuple[float | None, float | None]:
+    """Répartit une mesure entre colonne **native** et colonne **IFC OpenShell**.
+
+    Quatre cas, et un seul comportement à retenir : chaque colonne ne reçoit
+    que ce qui lui appartient, jamais une valeur recopiée.
+
+    - native **et** calcul présents → les deux colonnes, vraie comparaison ;
+    - native seule → colonne native remplie, colonne calculée vide ;
+    - calcul seul (*gap-fill*) → la valeur est dans le pset mais elle est
+      calculée : elle va en colonne IFC OpenShell, la native reste vide ;
+    - aucune des deux → les deux colonnes vides.
+
+    **La méthode filtre.** Une valeur dont la méthode n'est pas comparable à une
+    BaseQuantity native (cf. :data:`_METHODES_COMPARABLES`) n'entre dans aucune
+    colonne : ni en calculée, où elle produirait un écart faux, ni en native,
+    où elle passerait pour une donnée de maquette. Mieux vaut un blanc expliqué
+    qu'un écart faux — c'est à l'appelant d'écrire la note qui l'explique.
+    """
+    calcule, methode = _comparison_quantity(el, qty_names)
+    if calcule is not None and not _methode_comparable(methode):
+        calcule = None
+    if not _computed_qty_names(el) & set(qty_names):
+        return valeur, calcule
+    # *Gap-fill* : ``valeur`` vient du pset, donc du calcul — jamais du natif.
+    # Sans entrée de comparaison, c'est ELLE la valeur calculée, et sa méthode
+    # vit dans la trace de fusion.
+    if calcule is not None:
+        return None, calcule
+    methode_fusionnee = next(
+        (
+            c.get("method")
+            for c in (el.get("computed_base_quantities") or [])
+            if c.get("quantity") in qty_names
+        ),
+        None,
+    )
+    return None, (valeur if _methode_comparable(methode_fusionnee) else None)
+
+
+def _methodes_non_comparables(el: dict, qty_names: tuple[str, ...]) -> set[str]:
+    """Méthodes écartées pour cet élément — de quoi écrire la note de méthode.
+
+    Écarter une valeur sans le dire ferait lire une colonne vide comme une
+    absence de calcul, alors que le calcul existe et a été jugé non comparable.
+    """
+    return {
+        c.get("method") or "inconnue"
+        for c in (el.get("computed_comparison_quantities") or [])
+        if c.get("quantity") in qty_names
+        and c.get("value") is not None
+        and not _methode_comparable(c.get("method"))
     }
 
 
@@ -734,6 +857,11 @@ def _space_records(snap: ModelSnapshot) -> list[dict[str, Any]]:
                 if annexe
                 else (_typologie_zone(zone_type) if has_zone else ""),
                 "net": net,
+                # Surfaces réparties par provenance : la native alimente
+                # « Surface Nette (Qté de Base) », la calculée « Surface IFC
+                # OpenShell ». Les deux coexistent dès que le calcul existe.
+                "net_natif": _mesures_natif_et_calcule(sp, net, _SPACE_BQ_ORDER)[0],
+                "net_calcule": _mesures_natif_et_calcule(sp, net, _SPACE_BQ_ORDER)[1],
                 "gross": gross,
                 "storey": _MULTI_SEP.join(storeys),
                 "source": _quantity_source(sp, net is not None, _SPACE_BQ_ORDER),
@@ -818,14 +946,17 @@ def _zone_detail_grid(
     - **jamais de valeur recopiée pour simuler une comparaison**. G et H
       recevaient LITTÉRALEMENT la même variable ``net`` : l'écart L était donc
       vide par construction et se lisait comme une concordance vérifiée alors
-      que rien ne l'avait été. Après la fusion *gap-only*, une quantité est soit
-      native, soit calculée — jamais les deux. On remplit donc **la colonne qui
-      correspond à la provenance**, et l'autre reste vide ;
+      que rien ne l'avait été. Chaque colonne ne reçoit désormais que ce qui lui
+      appartient — H la valeur native BIMData, G la valeur calculée par IFC
+      OpenShell. Les deux **coexistent** dès que le calcul existe : c'est le cas
+      recherché, celui qui rend l'écart exploitable (cf.
+      :func:`_mesures_natif_et_calcule` pour les quatre cas) ;
     - la provenance se lisant à l'emplacement de la valeur, la 13ᵉ colonne
       ``Source quantité`` — absente du gabarit — n'a plus lieu d'être.
 
-    L'écart garde la **forme relative** du gabarit, mais gardé : sans les deux
-    valeurs, il n'y a pas d'écart à afficher (et ``H/G-1`` donnerait ``#DIV/0!``).
+    L'écart garde la **forme relative** du gabarit, mais gardé : il n'y a rien à
+    afficher tant qu'une seule des deux sources alimente la ligne (et ``H/G-1``
+    donnerait ``#DIV/0!``).
     """
     lignes = _records_detail(records)
     if not lignes:
@@ -834,11 +965,9 @@ def _zone_detail_grid(
     rows: list[list[Any]] = [list(headers)]
     for rec in lignes:
         excel_row = len(rows) + 1
-        net = _round2(rec["net"])
         gross = _round2(rec["gross"])
-        calculee = rec["source"] == _SRC_COMPUTED
-        openshell = net if calculee else None
-        natif = None if calculee else net
+        natif = _round2(rec["net_natif"])
+        openshell = _round2(rec["net_calcule"])
         rows.append(
             [
                 rec["first_component"],
@@ -1028,14 +1157,15 @@ def build_menuiseries_from_snapshot(
 
     - **source unique assumée** — aucun libellé « Solibri » ; les colonnes de
       mesure disent IFC OpenShell ;
-    - **jamais de valeur recopiée pour simuler une comparaison**. Après la
-      fusion *gap-only*, une quantité est soit native, soit calculée — **jamais
-      les deux**. Écrire la même valeur en D et en H produisait un écart K
-      systématiquement vide, qui se lisait comme une concordance vérifiée alors
-      que rien ne l'avait été. On remplit donc **la colonne qui correspond à la
-      provenance**, et l'autre reste vide. C'est aussi ce qui rend inutile
-      l'ancienne 15ᵉ colonne « Source quantité », étrangère au gabarit : la
-      provenance se lit désormais à l'emplacement de la valeur.
+    - **jamais de valeur recopiée pour simuler une comparaison**. Écrire la même
+      valeur en D et en H produisait un écart K systématiquement vide, qui se
+      lisait comme une concordance vérifiée alors que rien ne l'avait été.
+      D/E/F portent la mesure **native BIMData**, H/I/J la mesure **calculée par
+      IFC OpenShell** : chaque colonne ne reçoit que ce qui lui appartient, et
+      les deux coexistent dès que le calcul existe — c'est ce qui rend l'écart
+      exploitable. C'est aussi ce qui rend inutile l'ancienne 15ᵉ colonne
+      « Source quantité », étrangère au gabarit : la provenance se lit à
+      l'emplacement de la valeur.
     """
     items = [el for cls in _FENETRE_CLASSES for el in snap.of_class(cls)]
     if not items:
@@ -1056,66 +1186,88 @@ def build_menuiseries_from_snapshot(
         "",
         "Couleur",
     ]
-    men_qty = ("Width", "Height", "OverallWidth", "OverallHeight")
-    area_qty = (*men_qty, *_WINDOW_BQ_AREA)
+    _LARGEUR_QTY = ("Width", "OverallWidth")
+    _HAUTEUR_QTY = ("Height", "OverallHeight")
     groups: dict[tuple[Any, ...], dict[str, Any]] = {}
     total = 0.0
     any_area = False
+    methodes_ecartees: set[str] = set()
     for item in items:
         w = _rich(snap, item)
-        width = _base_quantity_ordered(w, ("Width", "OverallWidth"))
-        height = _base_quantity_ordered(w, ("Height", "OverallHeight"))
-        surf, _src = _surface_with_source(w, _WINDOW_BQ_AREA)
-        if surf is None and width is not None and height is not None:
-            surf = width * height
+        width = _base_quantity_ordered(w, _LARGEUR_QTY)
+        height = _base_quantity_ordered(w, _HAUTEUR_QTY)
+        ot = _object_type_or_name(w)
+        methodes_ecartees |= _methodes_non_comparables(
+            w, (*_LARGEUR_QTY, *_HAUTEUR_QTY, *_WINDOW_BQ_AREA)
+        )
+        # Chaque dimension est répartie entre sa colonne native et sa colonne
+        # calculée. Les deux coexistent dès que le calcul IFC OpenShell existe :
+        # c'est ce qui rend l'écart D/H réellement comparable.
+        l_nat, l_calc = _mesures_natif_et_calcule(w, width, _LARGEUR_QTY)
+        h_nat, h_calc = _mesures_natif_et_calcule(w, height, _HAUTEUR_QTY)
+        # Une SURFACE ne se cherche que parmi des noms de surface. Chercher
+        # ``Width``/``Height`` ici ferait sortir une LARGEUR dans la colonne
+        # « Surface IFC OpenShell » : ``_comparison_quantity`` rend le premier
+        # nom trouvé, et une fenêtre calculée 2 × 3 aurait affiché 2 au lieu
+        # de 6. Le produit des dimensions ne sert que de repli, et seulement
+        # entre valeurs de MÊME provenance.
+        aire, _src = _surface_with_source(w, _WINDOW_BQ_AREA)
+        s_nat, s_calc = _mesures_natif_et_calcule(w, aire, _WINDOW_BQ_AREA)
+        if s_nat is None and l_nat is not None and h_nat is not None:
+            s_nat = l_nat * h_nat
+        if s_calc is None and l_calc is not None and h_calc is not None:
+            s_calc = l_calc * h_calc
+        # La superficie totale du livrable suit la valeur qui fait autorité :
+        # la native si elle existe, la calculée à défaut.
+        surf = s_nat if s_nat is not None else s_calc
         if surf is not None:
             total += surf
             any_area = True
-        ot = _object_type_or_name(w)
-        # La PROVENANCE entre dans la clé de regroupement. Sans elle, deux
-        # fenêtres de même type et mêmes dimensions — l'une native, l'autre
-        # calculée — tombaient dans le même groupe, et un unique booléen
-        # décidait pour les deux : le livrable annonçait alors une provenance
-        # fausse pour la moitié des éléments comptés sur la ligne.
-        calculee = bool(_computed_qty_names(w) & set(area_qty))
+        # La clé de regroupement porte les QUATRE mesures, pas un profil de
+        # présence. Ne garder que la largeur retenue fondait deux fenêtres de
+        # même largeur native mais de hauteurs — ou de calculs — différents ;
+        # la ligne reprenait alors les dimensions du premier élément vu. C'est
+        # le défaut « groupe mixte » sous une forme plus fine.
         key = (
             _ifc_component_label(w.get("type")),
             ot,
             _material(w),
-            _round2(width),
-            _round2(height),
-            calculee,
+            _round2(l_nat),
+            _round2(l_calc),
+            _round2(h_nat),
+            _round2(h_calc),
+            # Profil de la surface : deux fenêtres de mêmes dimensions dont
+            # l'une seulement porte une surface calculée ne se somment pas.
+            (s_nat is not None, s_calc is not None),
         )
         entry = groups.setdefault(
             key,
             {
                 "surface": 0.0,
+                "surface_calc": 0.0,
                 "surface_found": False,
+                "surface_calc_found": False,
                 "count": 0,
-                "computed": False,
             },
         )
         entry["count"] += 1
-        if surf is not None:
-            entry["surface"] += surf
+        if s_nat is not None:
+            entry["surface"] += s_nat
             entry["surface_found"] = True
-        # ``computed`` est désormais porté par la CLÉ : tous les éléments d'un
-        # groupe partagent la même provenance, par construction.
-        entry["computed"] = calculee
+        if s_calc is not None:
+            entry["surface_calc"] += s_calc
+            entry["surface_calc_found"] = True
 
     rows: list[list[Any]] = []
-    for key, entry in sorted(
-        groups.items(), key=lambda kv: tuple("" if v is None else v for v in kv[0])
-    ):
-        component, ot, material, width, height, _provenance = key
+    for key, entry in sorted(groups.items(), key=lambda kv: tuple(str(v) for v in kv[0])):
+        component, ot, material, l_nat, l_calc, h_nat, h_calc, _profil_surface = key
         excel_row = len(rows) + 2
         surface = _round2(entry["surface"]) if entry["surface_found"] else None
-        # La provenance décide de la COLONNE, pas d'un libellé en bout de ligne.
-        # Une valeur calculée par IFC OpenShell va en H/I/J ; une valeur native
-        # de la maquette va en D/E/F. Jamais les deux : elles ne coexistent pas.
-        calculee = entry["computed"]
-        natif = (None, None, None) if calculee else (width, height, surface)
-        openshell = (width, height, surface) if calculee else (None, None, None)
+        surface_calc = _round2(entry["surface_calc"]) if entry["surface_calc_found"] else None
+        # Les dimensions viennent de la CLÉ : elles sont donc celles du groupe
+        # entier, et non celles du premier élément rencontré.
+        natif = (l_nat, h_nat, surface)
+        openshell = (l_calc, h_calc, surface_calc)
         rows.append(
             [
                 component,
@@ -1131,10 +1283,25 @@ def build_menuiseries_from_snapshot(
             ]
         )
     table = SheetTable(title="Menuiseries", headers=headers, rows=rows)
+    notes: list[str] = []
+    if methodes_ecartees:
+        # Une colonne vide se lit comme « aucun calcul disponible ». Ici le
+        # calcul existe : il a été écarté parce qu'il ne mesure pas la même
+        # grandeur. Le dire vaut mieux qu'un écart faux, et mieux qu'un blanc
+        # muet.
+        notes.append(
+            "Dimensions calculées disponibles mais NON comparables aux "
+            "BaseQuantities nominales : elles proviennent d'une boîte "
+            f"englobante ({', '.join(sorted(methodes_ecartees))}), qui mesure "
+            "l'encombrement de la menuiserie et non sa largeur ou sa hauteur "
+            "nominale. Les colonnes « … IFC OpenShell » et les écarts restent "
+            "donc vides pour ces éléments."
+        )
     src = MenuiseriesSource(
         table=table,
         sheet_title="TDB 2022 05.1 - Fenêtres Ok",
         nombre_types=(len(groups) or None),
+        notes=notes,
     )
     return src, (round(total, 4) if any_area else None)
 
@@ -1289,7 +1456,14 @@ def _note_methode_plancher(groups: dict[tuple[str, str, str], dict[str, Any]]) -
     qui totalisait annexes et espaces non zonés. On ne produit pas ce total, et
     on dit ici pourquoi plutôt que de laisser croire à un oubli.
     """
-    total_dalles = sum((_num(e["area"]) or 0.0) for e in groups.values() if e.get("found"))
+    # Une dalle compte une fois : sa surface native si la maquette la porte,
+    # sinon la surface calculée. Ne sommer que la native écarterait du total
+    # les dalles dont la quantité vient d'un calcul.
+    total_dalles = sum(
+        (_num(e["area"]) or 0.0) if e.get("found") else (_num(e["area_calc"]) or 0.0)
+        for e in groups.values()
+        if e.get("found") or e.get("found_calc")
+    )
     return [
         ["Note de méthode"],
         [],
@@ -1308,10 +1482,12 @@ def _note_methode_plancher(groups: dict[tuple[str, str, str], dict[str, Any]]) -
         ],
         [],
         [
-            "Une quantité est native (BaseQuantities) OU calculée par IFC "
-            "OpenShell, jamais les deux : une seule des deux colonnes de "
-            "mesure est renseignée par ligne, et la colonne d'écart reste donc "
-            "vide tant qu'une seule source alimente le livrable."
+            "« BaseQuantities.NetArea » porte la valeur native de la maquette ; "
+            "« Surface IFC OpenShell » porte la valeur calculée par analyse "
+            "géométrique, fournie pour comparaison. Les deux coexistent dès "
+            "que le calcul est disponible — c'est ce qui rend la colonne "
+            "d'écart exploitable. Une ligne dont seule la colonne calculée est "
+            "renseignée porte une quantité NON contractuelle."
         ],
     ]
 
@@ -1339,13 +1515,20 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
         # toute la ligne en colonne IFC OpenShell — y compris les dalles
         # natives qu'elle comptait : le livrable annonçait alors une provenance
         # fausse pour une partie de la surface affichée.
-        calculee = bool(_computed_qty_names(el) & set(_SLAB_BQ_ORDER))
-        key = (_ifc_component_label(el.get("type")), _slab_type_label(el), etage, calculee)
-        entry = groups.setdefault(key, {"area": 0.0, "found": False, "count": 0})
+        natif, calcule = _mesures_natif_et_calcule(el, surf, _SLAB_BQ_ORDER)
+        profil = (natif is not None, calcule is not None)
+        key = (_ifc_component_label(el.get("type")), _slab_type_label(el), etage, profil)
+        entry = groups.setdefault(
+            key,
+            {"area": 0.0, "found": False, "area_calc": 0.0, "found_calc": False, "count": 0},
+        )
         entry["count"] += 1
-        if surf is not None:
-            entry["area"] += surf
+        if natif is not None:
+            entry["area"] += natif
             entry["found"] = True
+        if calcule is not None:
+            entry["area_calc"] += calcule
+            entry["found_calc"] = True
 
     detail_rows: list[list[Any]] = [
         [
@@ -1371,14 +1554,13 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
         ]
     ]
     for key, entry in sorted(groups.items()):
-        component, typ, storey, calculee = key
-        area = _round2(entry["area"]) if entry["found"] else None
-        # La provenance décide de la COLONNE, elle ne se répète pas en bout de
-        # ligne. D et E recevaient LITTÉRALEMENT la même variable ``area`` :
-        # l'écart F était vide par construction et se lisait comme une
-        # concordance vérifiée alors que rien ne l'avait été.
-        natif = None if calculee else area
-        openshell = area if calculee else None
+        component, typ, storey, _profil = key
+        # Chaque colonne ne reçoit que ce qui lui appartient. D et E recevaient
+        # LITTÉRALEMENT la même variable ``area`` : l'écart F était vide par
+        # construction et se lisait comme une concordance vérifiée alors que
+        # rien ne l'avait été.
+        natif = _round2(entry["area"]) if entry["found"] else None
+        openshell = _round2(entry["area_calc"]) if entry["found_calc"] else None
         detail_rows.append([component, typ, storey, natif, openshell, entry["count"], ""])
         excel_row = len(summary_rows) + 1
         summary_rows.append(

@@ -68,7 +68,9 @@ def _space(uuid: str, longname: str, area: float, *, computed: bool = False) -> 
         ],
     }
     if computed:
-        el["computed_base_quantities"] = [{"quantity": "NetFloorArea", "value": area}]
+        el["computed_base_quantities"] = [
+            {"quantity": "NetFloorArea", "value": area, "method": "ifcopenshell_geometry"}
+        ]
     return el
 
 
@@ -282,17 +284,22 @@ def test_type_piece_dune_annexe_est_annexes():
 # ── 5. G et H ne peuvent pas venir de la même source ────────────────────────
 
 
-def test_une_seule_colonne_de_mesure_est_remplie_par_ligne():
-    """Doctrine #210 : après la fusion *gap-only*, une quantité est soit
-    native, soit calculée — jamais les deux. Remplir G et H avec la même
-    variable rendait l'écart vide par construction."""
+def test_chaque_colonne_ne_recoit_que_sa_propre_source():
+    """Ce qui est interdit n'est pas que les deux colonnes soient remplies —
+    c'est qu'elles le soient avec la **même** valeur.
+
+    Le corpus de ce fichier ne porte aucune valeur de comparaison : chaque
+    ligne n'a donc qu'une source, et l'écart reste vide. La matrice complète —
+    dont le cas ``native + calcul``, celui qui rend l'écart exploitable — est
+    figée dans ``test_computed_comparison_quantities.py``.
+    """
     rows = _detail()
     openshell = _col(rows, "Surface IFC OpenShell")
     natif = _col(rows, "Surface Nette (Qté de Base)")
+    assert any(v is not None for v in natif), "aucune mesure native : le test serait vide"
     for g, h in zip(openshell, natif, strict=True):
-        assert (g is None) != (h is None), (
-            f"G={g} H={h} : les deux colonnes de mesure portent une valeur, "
-            "donc l'écart ne compare rien"
+        assert not (g is not None and h is not None and g == h), (
+            f"G={h} H={h} : la même valeur dans les deux colonnes ne compare rien"
         )
 
 
@@ -424,3 +431,56 @@ def test_la_note_ne_sapplique_pas_a_des_quantites_natives():
         copie[calc] = None
         natives.append(copie)
     assert not _rows_have_computed(natives)
+
+
+def test_une_valeur_de_comparaison_remplit_les_deux_colonnes_et_rend_lecart_exploitable():
+    """Non-vacuité du cas central : native **et** calcul sur la même ligne.
+
+    Tant que la fusion jetait la valeur calculée dès qu'une native existait, ce
+    cas ne pouvait pas se produire — la colonne « Surface IFC OpenShell » était
+    vide par construction et la garde de l'écart se déclenchait toujours. Un
+    test qui exigeait « une seule colonne remplie » passait donc pour la
+    mauvaise raison : il protégeait une impossibilité.
+    """
+    from audit_bim.extraction.computed_quantities import merge_into_snapshot
+
+    snap = _snapshot()
+    merge_into_snapshot(
+        snap,
+        {
+            "schema": "computed_base_quantities/v1",
+            "quantities": [
+                {
+                    "global_id": "SP_A",
+                    "ifc_class": "IfcSpace",
+                    "qto": "Qto_SpaceBaseQuantities",
+                    "quantity": "NetFloorArea",
+                    "value": 12.6,  # natif 12,0 → écart +5 %
+                    "unit": "m2",
+                    "method": "ifcopenshell_geometry",
+                    "status": "computed",
+                    "source": "computed_ifcopenshell",
+                }
+            ],
+        },
+    )
+    rows = next(
+        g.rows
+        for g in build_zones_espaces_from_snapshot(snap).grids
+        if g.title.startswith("TDB 2022 01.3")
+    )
+    entetes = rows[0]
+    i_piece = entetes.index("Pièce (Nombre)")
+    i_calc = entetes.index("Surface IFC OpenShell")
+    i_natif = entetes.index("Surface Nette (Qté de Base)")
+    ligne = next(r for r in rows[1:] if r[i_piece] == "CHAMBRE 01" and r[i_natif] == 12.0)
+
+    assert ligne[i_natif] == 12.0, "la native doit rester dans sa colonne"
+    assert ligne[i_calc] == 12.6, "la valeur de comparaison doit remplir la colonne calculée"
+    assert ligne[i_calc] / ligne[i_natif] - 1 == pytest.approx(0.05), "écart exploitable"
+
+    # …et la garde de la formule ne se déclenche plus : les deux cellules
+    # référencées sont non vides, donc l'écart s'affiche vraiment.
+    formule = ligne[entetes.index("écarts")]
+    assert formule.startswith("=IF(OR(")
+    assert "G" in formule and "H" in formule

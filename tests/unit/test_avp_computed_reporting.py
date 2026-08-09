@@ -133,8 +133,16 @@ def test_pack_shab_carries_methodo_note_and_computed_cell(tmp_path):
     # Le caractère calculé se lit désormais dans l'en-tête de la colonne qui
     # porte la valeur, et non dans un libellé répété en bout de ligne.
     assert "Surface IFC OpenShell" in text
-    assert "contractuelles" in text  # note méthodo « valeurs NON contractuelles »
-    assert "IfcOpenShell" in text
+    # La note méthodo dit le RÔLE de chaque colonne, et à quelle condition une
+    # quantité n'est pas contractuelle : lorsque seule la colonne calculée est
+    # renseignée. Elle n'affirme plus qu'une quantité est « native OU calculée »
+    # — les deux coexistent dès qu'une valeur de comparaison existe.
+    assert "Provenance des quantités" in text
+    assert "NON contractuelle" in text
+    assert "peuvent coexister" in text
+    # Orthographe canonique des livrables : « IFC OpenShell », pas le nom de la
+    # bibliothèque. Le texte client ne cite plus « IfcOpenShell ».
+    assert "IFC OpenShell" in text
 
 
 def test_docx_reports_computed_coverage(tmp_path):
