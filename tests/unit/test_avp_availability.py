@@ -108,9 +108,7 @@ def test_every_report_maps_to_a_deliverable_key():
 
 def test_snapshot_only_generates_business_but_never_identical_without_template_mode():
     avails = _by_key(inspect_avp_report_availability(_full_snapshot()))
-    # `plancher` est exclu : il est bloqué par une RÈGLE MÉTIER absente, pas
-    # par un manque de données — cf. test dédié plus bas.
-    for key in ("shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries"):
+    for key in ("shab_maquette", "zones_espaces", "surface_enveloppe", "menuiseries", "plancher"):
         av = avails[key]
         assert av.can_generate is True, key
         assert av.can_generate_identical is False, key
@@ -179,21 +177,17 @@ def test_source_present_generates_branded_not_identical():
     assert "template" in av.next_action.lower()
 
 
-def test_plancher_est_bloque_par_une_regle_metier_pas_par_les_donnees():
-    """La distinction porte l'action : on ne demande pas de compléter la
-    maquette, on demande un arbitrage.
+def test_plancher_est_de_nouveau_produisible():
+    """La règle métier de la Surface de plancher est établie et vérifiée
+    (cf. ``test_surface_de_plancher_regle``) : plus rien ne le bloque.
 
-    Non-vacuité : les données sont TOUTES présentes (`available_data` non vide,
-    `missing_data` vide côté métier). Le blocage ne vient donc pas d'elles.
+    Le MÉCANISME de blocage, lui, reste couvert dans ``test_blocage_metier`` —
+    sur une spécification patchée, pour ne pas dépendre d'un rapport
+    réellement bloqué.
     """
     av = _by_key(inspect_avp_report_availability(_full_snapshot()))["plancher"]
-    assert av.can_generate is False
-    assert av.status == "blocked"
-    assert av.available_data, "un blocage métier ne doit pas masquer les données présentes"
-    assert "règle métier" in av.next_action
-    assert "19" in av.next_action and "49" in av.next_action
-    # Le motif ne parle PAS de données manquantes : ce serait une fausse piste.
-    assert "compléter la maquette" not in av.next_action
+    assert av.can_generate is True
+    assert av.status == "partial"
 
 
 def test_menuiseries_source_only_generates_without_snapshot():

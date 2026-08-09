@@ -149,9 +149,7 @@ def test_pack_without_quantities_is_refused(session):
     assert res["error"] == "missing_quantities"
     assert res["needs_computed_quantities_json"] is True
     # Les quatre annexes concernées sont nommées.
-    # Plancher n'y figure plus : il n'est plus généré du tout (bloqué par une
-    # règle métier), donc il ne peut pas sortir « vide ».
-    assert set(res["empty_deliverables"]) == {"SHAB", "Zones/Espaces", "Menuiseries"}
+    assert set(res["empty_deliverables"]) == {"SHAB", "Zones/Espaces", "Menuiseries", "Plancher"}
     assert "computed_quantities_json" in res["next_step"]
 
 
@@ -176,6 +174,7 @@ def test_availability_tool_signals_the_need_upfront(session):
         "SHAB",
         "Zones/Espaces",
         "Menuiseries",
+        "Plancher",
     }
     assert "export_computed_base_quantities" in res["next_action"]
 

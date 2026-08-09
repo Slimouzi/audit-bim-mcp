@@ -1373,6 +1373,56 @@ _SLAB_COMPOSITE_PROPS = (
 _SLAB_THICKNESS_PROPS = ("Width", "Épaisseur")
 
 
+#: **Règle métier de la Surface de plancher**, extraite du gabarit
+#: ``260203 Tatare 0546L AVP - export plancher.xlsx`` et vérifiée contre lui.
+#:
+#: Contribue à la surface de plancher toute dalle qui constitue un **sol
+#: intérieur praticable**. Deux conditions, toutes deux nécessaires :
+#:
+#: 1. sa **face supérieure porte un revêtement de sol** — c'est ce qui distingue
+#:    un plancher d'une toiture, d'un faux plafond ou d'une structure nue ;
+#: 2. elle est **intérieure** — composite préfixé ``DI`` (dalle intérieure) ou
+#:    calque des dalles intérieures. C'est ce qui écarte les dalles extérieures
+#:    et les terrasses, dont le revêtement (dalette, pierre) en ferait sinon des
+#:    planchers.
+#:
+#: Ce n'est PAS une liste des 19 groupes du gabarit : c'est un critère, et le
+#: gabarit sert à le vérifier. Mesuré sur ``250613_MN_BAT (2).ifc`` : la règle
+#: retrouve **exactement** les 19 groupes retenus par la synthèse — 0 manquant,
+#: 0 en trop, aucun groupe partagé — et un total de 3 355,77 m² contre 3 355,76
+#: au gabarit (0,01 d'arrondi).
+#:
+#: LIMITE ASSUMÉE : la règle lit des propriétés ArchiCAD (« Surface supérieure »,
+#: « Structure Composite ») et le nom de calque. Elle suppose donc la convention
+#: de modélisation du chantier. Une maquette qui ne les porte pas ne produira
+#: aucune surface de plancher — un vide explicable, pas un total faux.
+_REVETEMENTS_DE_SOL = (
+    "carrelage",
+    "sol -",
+    "plastique - lamin",
+    "beton - liss",
+    "parquet",
+)
+#: Propriété ArchiCAD portant le revêtement de la face haute de la dalle.
+_PROP_SURFACE_SUPERIEURE = "Surface supérieure"
+#: Composite ArchiCAD ; le préfixe ``DI`` désigne une dalle intérieure.
+_PROP_STRUCTURE_COMPOSITE = "Structure Composite"
+_PREFIXE_DALLE_INTERIEURE = "di "
+_CALQUE_DALLES_INTERIEURES = _norm("DALLES - Intérieures")
+
+
+def _contribue_a_la_surface_de_plancher(el: dict) -> bool:
+    """La dalle constitue-t-elle un sol intérieur praticable ?"""
+    revetement = _norm(_prop_texte_any_pset(el, _PROP_SURFACE_SUPERIEURE))
+    if not any(r in revetement for r in _REVETEMENTS_DE_SOL):
+        return False
+    composite = _norm(_prop_texte_any_pset(el, _PROP_STRUCTURE_COMPOSITE))
+    if composite.startswith(_PREFIXE_DALLE_INTERIEURE):
+        return True
+    calques = _norm(" ".join((c.get("name") or "") for c in el.get("layers") or []))
+    return _CALQUE_DALLES_INTERIEURES in calques
+
+
 def _slab_type_label(el: dict) -> str:
     """Type métier d'une dalle : « <composite> <épaisseur en mm> ».
 
@@ -1441,25 +1491,18 @@ def count_planchers(snap: ModelSnapshot | None) -> int:
     return sum(len(snap.of_class(cls)) for cls in _SLAB_CLASSES)
 
 
-def _note_methode_plancher(groups: dict[tuple[str, str, str], dict[str, Any]]) -> list[list[Any]]:
-    """Trace ce que le livrable Plancher **ne dit pas**, et pourquoi.
+def _note_methode_plancher(
+    groups: dict[tuple[str, str, str, bool], dict[str, Any]],
+) -> list[list[Any]]:
+    """Dit ce que la synthèse retient, et sur quelle règle.
 
-    Le gabarit client porte, sous sa synthèse, un total ``Surface de plancher :``
-    ``=SUM(D2:D21)``. Mais sa synthèse ne retient que **19 des 49** groupes de
-    dalles : les types qui constituent réellement le plancher, à l'exclusion des
-    toitures zinc, des faux plafonds BA13, des dalles extérieures et des
-    complexes d'isolation. Cette sélection est un **arbitrage métier** ; aucune
-    donnée de la maquette ne la porte.
-
-    Totaliser nos dalles sous ce libellé afficherait donc une « surface de
-    plancher » qui n'en est pas une — la même erreur que le pivot Zones/Espaces
-    qui totalisait annexes et espaces non zonés. On ne produit pas ce total, et
-    on dit ici pourquoi plutôt que de laisser croire à un oubli.
+    Le détail est l'inventaire complet des dalles ; la synthèse ne porte que
+    celles qui composent un plancher. Sans cette note, un lecteur qui somme le
+    détail et compare à la synthèse ne saurait pas d'où vient l'écart.
     """
-    # Une dalle compte une fois : sa surface native si la maquette la porte,
-    # sinon la surface calculée. Ne sommer que la native écarterait du total
-    # les dalles dont la quantité vient d'un calcul.
-    total_dalles = sum(
+    retenus = {k: e for k, e in groups.items() if e["plancher"]}
+    total_retenu = sum((_num(e["area"]) or 0.0) for e in retenus.values() if e.get("found"))
+    total_tout = sum(
         (_num(e["area"]) or 0.0) if e.get("found") else (_num(e["area_calc"]) or 0.0)
         for e in groups.values()
         if e.get("found") or e.get("found_calc")
@@ -1468,26 +1511,33 @@ def _note_methode_plancher(groups: dict[tuple[str, str, str], dict[str, Any]]) -
         ["Note de méthode"],
         [],
         [
-            "Ce livrable ne porte pas de total « Surface de plancher ». Le "
-            "gabarit client le calcule sur une sélection des types de dalles "
-            "qui constituent le plancher ; cette sélection est un arbitrage "
-            "métier qu'aucune donnée de la maquette ne permet de reproduire."
+            "Surface de plancher — règle appliquée : contribue toute dalle qui "
+            "constitue un sol intérieur praticable, c'est-à-dire dont la face "
+            "supérieure porte un revêtement de sol (carrelage, parquet, sol "
+            "souple, béton lissé) ET qui est intérieure (composite « DI » ou "
+            "calque des dalles intérieures)."
         ],
-        ["groupes_de_dalles", len(groups)],
-        ["surface_toutes_dalles_m2", _round2(total_dalles)],
         [
-            "Le chiffre ci-dessus totalise TOUTES les dalles du modèle "
-            "(toitures, faux plafonds et dalles extérieures comprises) : ce "
+            "Sont donc écartées les toitures, les faux plafonds, les structures "
+            "nues sans revêtement, et les dalles extérieures — dont le "
+            "revêtement en ferait sinon des planchers."
+        ],
+        [],
+        ["groupes_de_dalles_inventories", len(groups)],
+        ["groupes_contribuant_au_plancher", len(retenus)],
+        ["surface_de_plancher_m2", _round2(total_retenu)],
+        ["surface_toutes_dalles_m2", _round2(total_tout)],
+        [
+            "L'onglet de détail est l'inventaire COMPLET des dalles : sa somme "
             "n'est pas une surface de plancher."
         ],
         [],
         [
             "« BaseQuantities.NetArea » porte la valeur native de la maquette ; "
             "« Surface IFC OpenShell » porte la valeur calculée par analyse "
-            "géométrique, fournie pour comparaison. Les deux coexistent dès "
-            "que le calcul est disponible — c'est ce qui rend la colonne "
-            "d'écart exploitable. Une ligne dont seule la colonne calculée est "
-            "renseignée porte une quantité NON contractuelle."
+            "géométrique, fournie pour comparaison. Le ratio de bas de synthèse "
+            "n'est écrit que si CHAQUE ligne porte les deux valeurs : sinon on "
+            "comparerait une somme partielle à une somme complète."
         ],
     ]
 
@@ -1520,9 +1570,21 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
         key = (_ifc_component_label(el.get("type")), _slab_type_label(el), etage, profil)
         entry = groups.setdefault(
             key,
-            {"area": 0.0, "found": False, "area_calc": 0.0, "found_calc": False, "count": 0},
+            {
+                "area": 0.0,
+                "found": False,
+                "area_calc": 0.0,
+                "found_calc": False,
+                "count": 0,
+                # La contribution à la surface de plancher est un attribut de la
+                # DALLE, pas du groupe : on la mémorise pour ne totaliser que ce
+                # qui compose réellement un plancher.
+                "plancher": False,
+            },
         )
         entry["count"] += 1
+        if _contribue_a_la_surface_de_plancher(el):
+            entry["plancher"] = True
         if natif is not None:
             entry["area"] += natif
             entry["found"] = True
@@ -1561,7 +1623,12 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
         # rien ne l'avait été.
         natif = _round2(entry["area"]) if entry["found"] else None
         openshell = _round2(entry["area_calc"]) if entry["found_calc"] else None
+        # Le DÉTAIL est l'inventaire complet des dalles — c'est une donnée
+        # d'audit. La SYNTHÈSE ne porte que ce qui compose un plancher : son
+        # total est une « Surface de plancher », pas une somme de dalles.
         detail_rows.append([component, typ, storey, natif, openshell, entry["count"], ""])
+        if not entry["plancher"]:
+            continue
         excel_row = len(summary_rows) + 1
         summary_rows.append(
             [
@@ -1575,6 +1642,42 @@ def build_plancher_from_snapshot(snap: ModelSnapshot) -> MultiSheetSource | None
                 f'=IF(OR(D{excel_row}="",E{excel_row}=""),"",'
                 f'IF(E{excel_row}-D{excel_row}=0,"",E{excel_row}/D{excel_row}-1))',
                 entry["count"],
+                "",
+            ]
+        )
+    # ── Bloc de total, à la forme du gabarit ────────────────────────────
+    derniere = len(summary_rows)
+    if derniere > 1:
+        ligne_total = derniere + 2  # une ligne blanche sépare, comme au gabarit
+        summary_rows.append([""] * 8)
+        summary_rows.append(
+            [
+                "",
+                "",
+                "Surface de plancher : ",
+                f"=SUM(D2:D{derniere})",
+                f"=SUM(E2:E{derniere})",
+                "",
+                "",
+                "",
+            ]
+        )
+        # Le ratio ne compare deux totaux que si CHAQUE ligne porte les deux
+        # valeurs. Sinon ``SUM`` ignore les vides et l'on comparerait une somme
+        # partielle à une somme complète — un écart faux, présenté comme un
+        # contrôle.
+        toutes_comparables = all(
+            r[3] is not None and r[4] is not None for r in summary_rows[1:derniere]
+        )
+        summary_rows.append(
+            [
+                "",
+                "",
+                "",
+                "",
+                f"=E{ligne_total}/D{ligne_total}-1" if toutes_comparables else "",
+                "",
+                "",
                 "",
             ]
         )
