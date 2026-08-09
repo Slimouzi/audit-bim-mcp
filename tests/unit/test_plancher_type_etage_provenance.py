@@ -140,13 +140,21 @@ def _col(rows: list[list], nom: str) -> list:
 # ── 1. Une seule colonne de mesure remplie par ligne ────────────────────────
 
 
-def test_une_seule_colonne_de_mesure_est_remplie_par_ligne():
+def test_chaque_colonne_ne_recoit_que_sa_propre_source():
+    """Ce qui est interdit n'est pas que les deux colonnes soient remplies —
+    c'est qu'elles le soient avec la **même** valeur, ce qui vidait l'écart par
+    construction. Le corpus de ce fichier n'a pas de valeur de comparaison ;
+    la matrice complète est figée dans ``test_computed_comparison_quantities``.
+    """
     rows = _grilles()[_DETAIL]
     natif = _col(rows, "BaseQuantities.NetArea")
     calcule = _col(rows, "Surface IFC OpenShell")
+    assert any(v is not None for v in natif) and any(v is not None for v in calcule), (
+        "les deux provenances doivent être représentées, sinon le test est vide"
+    )
     for d, e in zip(natif, calcule, strict=True):
-        assert (d is None) != (e is None), (
-            f"D={d} E={e} : les deux colonnes portent une valeur, l'écart ne compare rien"
+        assert not (d is not None and e is not None and d == e), (
+            f"D={d} E={e} : la même valeur dans les deux colonnes ne compare rien"
         )
 
 

@@ -6,14 +6,14 @@ Ce document existe pour qu'on ne nettoie pas `reporting` au jugé.
 ## Le constat qui change la nature du lot
 
 `audit_bim/query` était une façade : 152 lignes de pur passe-plat, supprimées
-sans conséquence. **`reporting` n'en est pas une.** 23 modules, **8 797 lignes**,
-dont **5 015 dans dix modules qui écrivent un fichier**.
+sans conséquence. **`reporting` n'en est pas une.** 23 modules, **8 803 lignes**,
+dont **5 006 dans dix modules qui écrivent un fichier**.
 
 | Nature | Modules | Lignes |
 |---|---:|---:|
 | Façade pure vers `bim-reporting` | 0 | — |
 | Sans attache directe mesurée | 2 | 7 |
-| Lié au livrable I3F par ses appelants | 9 | 2 673 |
+| Lié au livrable I3F par ses appelants | 9 | 2 679 |
 | Orchestration I3F | 12 | **6 117** |
 
 **Aucune catégorie ne s'appelle « neutre »**, et c'est délibéré. Le mot serait lu
@@ -76,11 +76,15 @@ ses chaînes malgré `ReferenceFramework`.
 
 ## La nuance qui commande le découpage
 
-**`avp_snapshot.py` — 1 502 lignes, aucune dépendance I3F, aucun terme client.**
+**`avp_snapshot.py` — 1 508 lignes, aucune dépendance I3F, aucun terme client.**
 Mesuré sur ses seuls imports, c'est le plus gros bloc sans attache du module.
-Mais ses six appelants sont `avp/pack`, `avp/docx_analyse`, `avp/xlsx_common`,
-`avp_availability`, `avp_i3f` et `tools_reporting` : **il n'existe que pour
-alimenter le pack AVP**.
+Mais ses cinq appelants sont `avp/pack`, `avp/docx_analyse`, `avp_availability`,
+`avp_i3f` et `tools_reporting` : **il n'existe que pour alimenter le pack AVP**.
+
+`avp/xlsx_common` en était le sixième : il importait `_SRC_COMPUTED` pour
+reconnaître le libellé de provenance en bout de ligne. Cette colonne ayant
+disparu de tous les livrables, le writer ne lit plus que ses propres en-têtes —
+un couplage de moins, obtenu en retirant du code mort, pas en refactorant.
 
 Son code ne connaît pas le référentiel ; personne d'autre ne l'appelle. C'est la
 même nuance que celle rencontrée dans l'inventaire du socle partagé — du code

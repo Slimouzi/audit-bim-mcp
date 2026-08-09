@@ -300,8 +300,12 @@ def test_a_mixed_group_is_split_by_provenance():
     lignes = src.table.rows
 
     assert len(lignes) == 2, f"groupe mixte non scindé : {lignes}"
-    # Chaque ligne compte UN élément, et remplit une seule des deux colonnes.
+    # Chaque ligne compte UN élément. Ici la fenêtre calculée n'a pas de valeur
+    # native et la native pas de calcul : chacune ne remplit donc qu'une
+    # colonne. Ce que le test verrouille n'est pas cette exclusivité — les deux
+    # colonnes coexistent dès qu'une valeur de comparaison existe — mais le
+    # fait que les deux provenances ne soient PAS fondues dans une seule ligne.
     for ligne in lignes:
         assert ligne[6] == 1, ligne
-        assert (ligne[3] is None) != (ligne[7] is None), ligne
+        assert ligne[3] is not None or ligne[7] is not None, ligne
     assert {ligne[3] is None for ligne in lignes} == {True, False}

@@ -14,7 +14,6 @@ import openpyxl
 import xlsxwriter
 
 from ...requirements._openpyxl_compat import patch_openpyxl
-from ..avp_snapshot import _SRC_COMPUTED
 from ..avp_sources import SheetTable
 from ..word_report import NOT_AVAILABLE
 from ..xlsx_annex import _build_formats, write_safe
@@ -28,28 +27,23 @@ patch_openpyxl()
 
 #: Motif des en-têtes de colonnes portant une quantité **calculée**.
 _COL_OPENSHELL_TOKEN = "IFC OpenShell"
-#: En-tête de l'ancien mécanisme de traçabilité (provenance écrite en toutes
-#: lettres en bout de ligne). Sa présence identifie une table **non migrée**.
-_COL_SOURCE_QUANTITE = "Source quantité"
 
 
 def _rows_have_computed(rows, headers=None) -> bool:
     """Vrai si une table porte au moins une quantité calculée par IfcOpenShell.
 
-    Deux mécanismes de traçabilité coexistent, et la table dit lequel elle
-    emploie :
+    La provenance se lit à **l'emplacement de la valeur** : une mesure sous un
+    en-tête « … IFC OpenShell » vient d'un calcul géométrique, une mesure sous
+    « … (Qté de Base) » vient de la maquette. Les deux **coexistent** dès que le
+    calcul est disponible — c'est ce qui rend la colonne d'écart exploitable —
+    donc la présence d'une valeur calculée ne dit rien sur celle d'une native,
+    et réciproquement.
 
-    - **non migrée** — une colonne ``Source quantité`` porte la provenance en
-      toutes lettres. C'est encore le cas du livrable Plancher, dont les deux
-      colonnes de mesure reçoivent la même valeur : y lire un calcul dans la
-      colonne « IFC OpenShell » qualifierait de calculée une quantité native ;
-    - **migrée** (doctrine #210) — la provenance se lit à **l'emplacement de la
-      valeur**, une seule des deux colonnes étant renseignée. C'est le cas des
-      livrables Zones/Espaces, SHAB et Fenêtres.
-
-    Ne chercher que l'ancien libellé faisait disparaître la note « valeurs NON
-    contractuelles » des livrables migrés — sans erreur, la note étant
-    facultative.
+    Chercher l'ancien libellé « Calculée (IfcOpenShell) » dans une cellule ne
+    marche plus : la colonne `Source quantité` qui le portait a disparu de tous
+    les livrables (#210 Fenêtres, #211 Zones/Espaces + SHAB, #212 Plancher).
+    S'y fier faisait disparaître la note « valeurs NON contractuelles » sans
+    erreur, la note étant facultative.
 
     ``headers`` est explicite car les deux porteurs diffèrent : ``SheetGrid``
     inclut sa ligne d'en-tête dans ``rows``, ``SheetTable`` la garde à part.
@@ -60,9 +54,6 @@ def _rows_have_computed(rows, headers=None) -> bool:
     if headers is None:
         entetes = [e if isinstance(e, str) else "" for e in (rows[0] if rows else [])]
         donnees = rows[1:]
-
-    if any(e == _COL_SOURCE_QUANTITE for e in entetes):
-        return any(c == _SRC_COMPUTED for r in rows for c in (r or []))
 
     colonnes = [i for i, entete in enumerate(entetes) if _COL_OPENSHELL_TOKEN in entete]
     return any(

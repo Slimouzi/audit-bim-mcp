@@ -13,14 +13,23 @@ from pathlib import Path
 from ..word_report import NOT_AVAILABLE
 
 # Mention normalisée (note méthodo) apposée sous les tables contenant des
-# quantités calculées : distingue le natif BIMData du calcul IfcOpenShell.
+# quantités calculées : dit le RÔLE de chaque colonne, et à quelle condition une
+# valeur n'est pas contractuelle.
+#
+# Ce texte est LIVRÉ AU CLIENT : il énonçait « une quantité est native OU
+# calculée », ce qui était vrai tant que la fusion jetait la valeur calculée dès
+# qu'une native existait. Les deux coexistent désormais — c'est même le cas
+# recherché, celui qui rend l'écart exploitable.
 _COMPUTED_METHODO_NOTE = (
-    "Quantités partiellement calculées par analyse géométrique IfcOpenShell "
-    "(colonnes « … IFC OpenShell ») — valeurs NON contractuelles, en attente "
-    "d'un ré-export maquette avec BaseQuantities natives. Les colonnes "
-    "« … (Qté de Base) » portent les BaseQuantities natives BIMData. Une "
-    "quantité est native OU calculée : une seule des deux colonnes est "
-    "renseignée par ligne."
+    "Provenance des quantités. Les colonnes « … (Qté de Base) » portent la "
+    "valeur native issue de la maquette lorsqu'elle la fournit ; les colonnes "
+    "« … IFC OpenShell » portent la valeur calculée par analyse géométrique, "
+    "fournie pour COMPARAISON. Les deux peuvent coexister sur une même ligne : "
+    "c'est le cas attendu, celui qui rend la colonne d'écart exploitable. "
+    "Lorsqu'une colonne « … (Qté de Base) » est vide et que la colonne "
+    "« … IFC OpenShell » est renseignée, la quantité provient du calcul : elle "
+    "est alors NON contractuelle, en attente d'un ré-export maquette avec "
+    "BaseQuantities natives."
 )
 
 # Convention de nommage documentaire I3F, **générée à partir de données

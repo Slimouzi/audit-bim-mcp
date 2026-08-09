@@ -242,10 +242,12 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
     La provenance ne se lit plus dans une colonne « Source quantité » en bout
     de ligne — absente du gabarit client, elle en déformait le tableau — mais à
     **l'emplacement de la valeur** : ``Surface IFC OpenShell`` pour le calculé,
-    ``Surface Nette (Qté de Base)`` pour le natif, jamais les deux (doctrine
-    #210). L'exigence est inchangée : ce qui est interdit, c'est qu'une valeur
-    fusionnée sorte sans provenance — le symptôme d'origine (299 fois
-    « Information non disponible » dans cette colonne).
+    ``Surface Nette (Qté de Base)`` pour le natif. Les deux **peuvent
+    coexister** — c'est le cas recherché, celui qui rend l'écart exploitable.
+    Ce que ce corpus exerce est le *gap-fill* : aucune BaseQuantity native, donc
+    seule la colonne calculée se remplit. L'exigence est inchangée : ce qui est
+    interdit, c'est qu'une valeur fusionnée sorte sans provenance — le symptôme
+    d'origine (299 fois « Information non disponible » dans cette colonne).
     """
     sess, _ = session
     sess.snapshot = _snapshot_sans_quantites()
@@ -267,9 +269,9 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
         v_natif = ws.cell(ligne, col_natif).value
         if v_calc is None and v_natif is None:
             continue  # ligne de séparation / sous-total
-        assert (v_calc is None) != (v_natif is None), (
-            f"ligne {ligne} de {Path(chemin).name} : les deux colonnes de "
-            "mesure sont remplies, la provenance n'est plus lisible"
+        assert not (v_calc is not None and v_natif is not None and v_calc == v_natif), (
+            f"ligne {ligne} de {Path(chemin).name} : la même valeur dans les "
+            "deux colonnes de mesure ne compare rien"
         )
         calculees += v_calc is not None
         natives += v_natif is not None

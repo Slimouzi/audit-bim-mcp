@@ -871,14 +871,17 @@ def _zone_detail_grid(
     - **jamais de valeur recopiée pour simuler une comparaison**. G et H
       recevaient LITTÉRALEMENT la même variable ``net`` : l'écart L était donc
       vide par construction et se lisait comme une concordance vérifiée alors
-      que rien ne l'avait été. Après la fusion *gap-only*, une quantité est soit
-      native, soit calculée — jamais les deux. On remplit donc **la colonne qui
-      correspond à la provenance**, et l'autre reste vide ;
+      que rien ne l'avait été. Chaque colonne ne reçoit désormais que ce qui lui
+      appartient — H la valeur native BIMData, G la valeur calculée par IFC
+      OpenShell. Les deux **coexistent** dès que le calcul existe : c'est le cas
+      recherché, celui qui rend l'écart exploitable (cf.
+      :func:`_mesures_natif_et_calcule` pour les quatre cas) ;
     - la provenance se lisant à l'emplacement de la valeur, la 13ᵉ colonne
       ``Source quantité`` — absente du gabarit — n'a plus lieu d'être.
 
-    L'écart garde la **forme relative** du gabarit, mais gardé : sans les deux
-    valeurs, il n'y a pas d'écart à afficher (et ``H/G-1`` donnerait ``#DIV/0!``).
+    L'écart garde la **forme relative** du gabarit, mais gardé : il n'y a rien à
+    afficher tant qu'une seule des deux sources alimente la ligne (et ``H/G-1``
+    donnerait ``#DIV/0!``).
     """
     lignes = _records_detail(records)
     if not lignes:
@@ -1079,14 +1082,15 @@ def build_menuiseries_from_snapshot(
 
     - **source unique assumée** — aucun libellé « Solibri » ; les colonnes de
       mesure disent IFC OpenShell ;
-    - **jamais de valeur recopiée pour simuler une comparaison**. Après la
-      fusion *gap-only*, une quantité est soit native, soit calculée — **jamais
-      les deux**. Écrire la même valeur en D et en H produisait un écart K
-      systématiquement vide, qui se lisait comme une concordance vérifiée alors
-      que rien ne l'avait été. On remplit donc **la colonne qui correspond à la
-      provenance**, et l'autre reste vide. C'est aussi ce qui rend inutile
-      l'ancienne 15ᵉ colonne « Source quantité », étrangère au gabarit : la
-      provenance se lit désormais à l'emplacement de la valeur.
+    - **jamais de valeur recopiée pour simuler une comparaison**. Écrire la même
+      valeur en D et en H produisait un écart K systématiquement vide, qui se
+      lisait comme une concordance vérifiée alors que rien ne l'avait été.
+      D/E/F portent la mesure **native BIMData**, H/I/J la mesure **calculée par
+      IFC OpenShell** : chaque colonne ne reçoit que ce qui lui appartient, et
+      les deux coexistent dès que le calcul existe — c'est ce qui rend l'écart
+      exploitable. C'est aussi ce qui rend inutile l'ancienne 15ᵉ colonne
+      « Source quantité », étrangère au gabarit : la provenance se lit à
+      l'emplacement de la valeur.
     """
     items = [el for cls in _FENETRE_CLASSES for el in snap.of_class(cls)]
     if not items:
@@ -1372,10 +1376,12 @@ def _note_methode_plancher(groups: dict[tuple[str, str, str], dict[str, Any]]) -
         ],
         [],
         [
-            "Une quantité est native (BaseQuantities) OU calculée par IFC "
-            "OpenShell, jamais les deux : une seule des deux colonnes de "
-            "mesure est renseignée par ligne, et la colonne d'écart reste donc "
-            "vide tant qu'une seule source alimente le livrable."
+            "« BaseQuantities.NetArea » porte la valeur native de la maquette ; "
+            "« Surface IFC OpenShell » porte la valeur calculée par analyse "
+            "géométrique, fournie pour comparaison. Les deux coexistent dès "
+            "que le calcul est disponible — c'est ce qui rend la colonne "
+            "d'écart exploitable. Une ligne dont seule la colonne calculée est "
+            "renseignée porte une quantité NON contractuelle."
         ],
     ]
 
