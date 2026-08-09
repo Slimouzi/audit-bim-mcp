@@ -1111,43 +1111,55 @@ def build_menuiseries_from_snapshot(
         "",
         "Couleur",
     ]
-    men_qty = ("Width", "Height", "OverallWidth", "OverallHeight")
-    area_qty = (*men_qty, *_WINDOW_BQ_AREA)
+    _LARGEUR_QTY = ("Width", "OverallWidth")
+    _HAUTEUR_QTY = ("Height", "OverallHeight")
     groups: dict[tuple[Any, ...], dict[str, Any]] = {}
     total = 0.0
     any_area = False
     for item in items:
         w = _rich(snap, item)
-        width = _base_quantity_ordered(w, ("Width", "OverallWidth"))
-        height = _base_quantity_ordered(w, ("Height", "OverallHeight"))
-        surf, _src = _surface_with_source(w, _WINDOW_BQ_AREA)
-        if surf is None and width is not None and height is not None:
-            surf = width * height
-        if surf is not None:
-            total += surf
-            any_area = True
+        width = _base_quantity_ordered(w, _LARGEUR_QTY)
+        height = _base_quantity_ordered(w, _HAUTEUR_QTY)
         ot = _object_type_or_name(w)
         # Chaque dimension est répartie entre sa colonne native et sa colonne
         # calculée. Les deux coexistent dès que le calcul IFC OpenShell existe :
         # c'est ce qui rend l'écart D/H réellement comparable.
-        l_nat, l_calc = _mesures_natif_et_calcule(w, width, ("Width", "OverallWidth"))
-        h_nat, h_calc = _mesures_natif_et_calcule(w, height, ("Height", "OverallHeight"))
-        s_nat, s_calc = _mesures_natif_et_calcule(w, surf, area_qty)
+        l_nat, l_calc = _mesures_natif_et_calcule(w, width, _LARGEUR_QTY)
+        h_nat, h_calc = _mesures_natif_et_calcule(w, height, _HAUTEUR_QTY)
+        # Une SURFACE ne se cherche que parmi des noms de surface. Chercher
+        # ``Width``/``Height`` ici ferait sortir une LARGEUR dans la colonne
+        # « Surface IFC OpenShell » : ``_comparison_quantity`` rend le premier
+        # nom trouvé, et une fenêtre calculée 2 × 3 aurait affiché 2 au lieu
+        # de 6. Le produit des dimensions ne sert que de repli, et seulement
+        # entre valeurs de MÊME provenance.
+        aire, _src = _surface_with_source(w, _WINDOW_BQ_AREA)
+        s_nat, s_calc = _mesures_natif_et_calcule(w, aire, _WINDOW_BQ_AREA)
+        if s_nat is None and l_nat is not None and h_nat is not None:
+            s_nat = l_nat * h_nat
         if s_calc is None and l_calc is not None and h_calc is not None:
             s_calc = l_calc * h_calc
-        # Le PROFIL DE PROVENANCE entre dans la clé de regroupement. Sans lui,
-        # deux fenêtres de même type et mêmes dimensions mais de provenances
-        # différentes tombaient dans le même groupe, et un unique booléen
-        # décidait pour les deux : le livrable annonçait une provenance fausse
-        # pour la moitié des éléments comptés sur la ligne.
-        profil = (l_nat is not None, l_calc is not None)
+        # La superficie totale du livrable suit la valeur qui fait autorité :
+        # la native si elle existe, la calculée à défaut.
+        surf = s_nat if s_nat is not None else s_calc
+        if surf is not None:
+            total += surf
+            any_area = True
+        # La clé de regroupement porte les QUATRE mesures, pas un profil de
+        # présence. Ne garder que la largeur retenue fondait deux fenêtres de
+        # même largeur native mais de hauteurs — ou de calculs — différents ;
+        # la ligne reprenait alors les dimensions du premier élément vu. C'est
+        # le défaut « groupe mixte » sous une forme plus fine.
         key = (
             _ifc_component_label(w.get("type")),
             ot,
             _material(w),
-            _round2(l_nat if l_nat is not None else l_calc),
-            _round2(h_nat if h_nat is not None else h_calc),
-            profil,
+            _round2(l_nat),
+            _round2(l_calc),
+            _round2(h_nat),
+            _round2(h_calc),
+            # Profil de la surface : deux fenêtres de mêmes dimensions dont
+            # l'une seulement porte une surface calculée ne se somment pas.
+            (s_nat is not None, s_calc is not None),
         )
         entry = groups.setdefault(
             key,
@@ -1157,8 +1169,6 @@ def build_menuiseries_from_snapshot(
                 "surface_found": False,
                 "surface_calc_found": False,
                 "count": 0,
-                "largeur": (l_nat, l_calc),
-                "hauteur": (h_nat, h_calc),
             },
         )
         entry["count"] += 1
@@ -1171,12 +1181,14 @@ def build_menuiseries_from_snapshot(
 
     rows: list[list[Any]] = []
     for key, entry in sorted(groups.items(), key=lambda kv: tuple(str(v) for v in kv[0])):
-        component, ot, material, _l, _h, _profil = key
+        component, ot, material, l_nat, l_calc, h_nat, h_calc, _profil_surface = key
         excel_row = len(rows) + 2
         surface = _round2(entry["surface"]) if entry["surface_found"] else None
         surface_calc = _round2(entry["surface_calc"]) if entry["surface_calc_found"] else None
-        natif = (_round2(entry["largeur"][0]), _round2(entry["hauteur"][0]), surface)
-        openshell = (_round2(entry["largeur"][1]), _round2(entry["hauteur"][1]), surface_calc)
+        # Les dimensions viennent de la CLÉ : elles sont donc celles du groupe
+        # entier, et non celles du premier élément rencontré.
+        natif = (l_nat, h_nat, surface)
+        openshell = (l_calc, h_calc, surface_calc)
         rows.append(
             [
                 component,

@@ -198,3 +198,99 @@ def test_lecart_devient_calculable_quand_les_deux_valeurs_existent():
     natif, calcule = _colonnes(snap)["CHAMBRE"]
     assert natif is not None and calcule is not None
     assert calcule / natif - 1 == pytest.approx(0.10)
+
+
+# ── Menuiseries : une surface ne se cherche que parmi des surfaces ─────────
+
+
+def _fenetre(uuid: str, ot: str, *, largeur=None, hauteur=None) -> dict:
+    """Fenêtre SANS aucune BaseQuantity native : tout viendra du calcul."""
+    return {
+        "uuid": uuid,
+        "type": "IfcWindow",
+        "name": ot,
+        "object_type": ot,
+        "property_sets": [],
+        **(
+            {}
+            if largeur is None
+            else {
+                "property_sets": [
+                    {
+                        "name": "BaseQuantities",
+                        "properties": [
+                            {"definition": {"name": "Width"}, "value": largeur},
+                            {"definition": {"name": "Height"}, "value": hauteur},
+                        ],
+                    }
+                ]
+            }
+        ),
+    }
+
+
+def _contrat_menuiserie(mesures: dict[str, tuple[float, float]]) -> dict:
+    return {
+        "schema": "computed_base_quantities/v1",
+        "quantities": [
+            {
+                "global_id": gid,
+                "ifc_class": "IfcWindow",
+                "qto": "Qto_WindowBaseQuantities",
+                "quantity": nom,
+                "value": valeur,
+                "unit": "m",
+                "method": "geometry",
+                "status": "computed",
+                "source": "computed_ifcopenshell",
+            }
+            for gid, (larg, haut) in mesures.items()
+            for nom, valeur in (("Width", larg), ("Height", haut))
+        ],
+    }
+
+
+def _table_menuiseries(elements: list[dict], contrat: dict):
+    from audit_bim.reporting.avp_snapshot import build_menuiseries_from_snapshot
+
+    snap = ModelSnapshot(project={"name": "P"}, model={"name": "M.ifc"}, elements=elements).index()
+    merge_into_snapshot(snap, contrat)
+    src, _total = build_menuiseries_from_snapshot(snap)
+    return src.table
+
+
+def test_la_surface_calculee_nest_jamais_une_largeur():
+    """``_comparison_quantity`` rend le **premier nom trouvé**. Chercher la
+    surface dans une liste commençant par ``Width`` faisait sortir la largeur
+    dans la colonne « Surface IFC OpenShell » : une fenêtre calculée 2 × 3
+    affichait **2** au lieu de 6, sans erreur ni cellule vide."""
+    table = _table_menuiseries(
+        [_fenetre("W1", "Fenêtre 200")], _contrat_menuiserie({"W1": (2.0, 3.0)})
+    )
+    ligne = table.rows[0]
+    largeur_calc, hauteur_calc, surface_calc = ligne[7], ligne[8], ligne[9]
+    assert (largeur_calc, hauteur_calc) == (2.0, 3.0)
+    assert surface_calc == 6.0, (
+        f"surface calculée = {surface_calc} : la colonne porte une dimension, pas une surface"
+    )
+
+
+def test_deux_fenetres_aux_calculs_differents_ne_fusionnent_pas():
+    """Mêmes type, matériau et dimensions NATIVES, calculs différents. Ne garder
+    que la largeur retenue dans la clé les fondait en une ligne, qui reprenait
+    les dimensions du premier élément vu — le défaut « groupe mixte » sous une
+    forme plus fine."""
+    elements = [
+        _fenetre("W1", "Fenêtre 200", largeur=2.0, hauteur=3.0),
+        _fenetre("W2", "Fenêtre 200", largeur=2.0, hauteur=3.0),
+    ]
+    table = _table_menuiseries(elements, _contrat_menuiserie({"W1": (2.1, 3.0), "W2": (2.4, 3.0)}))
+
+    assert len(table.rows) == 2, f"groupes fondus : {table.rows}"
+    natives = {(r[3], r[4]) for r in table.rows}
+    calculees = {(r[7], r[8]) for r in table.rows}
+    assert natives == {(2.0, 3.0)}, "les dimensions natives sont bien identiques"
+    assert calculees == {(2.1, 3.0), (2.4, 3.0)}, (
+        f"les calculs distincts doivent rester distincts : {calculees}"
+    )
+    assert [r[6] for r in table.rows] == [1, 1], "chaque ligne ne compte qu'un élément"
