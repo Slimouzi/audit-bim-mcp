@@ -77,16 +77,19 @@ def _docx_text(path):
 # ── colonne « Source quantité » dans les builders ───────────────────────
 
 
-def test_source_quantite_column_distinguishes_computed_vs_model():
+def test_la_colonne_de_mesure_distingue_le_calcule_du_natif():
+    """La provenance se lit à **l'emplacement de la valeur**, non dans une
+    colonne « Source quantité » ajoutée au tableau client (doctrine #210)."""
     ms, _total = build_shab_from_snapshot(_snapshot())
     rows = next(g.rows for g in ms.grids if g.title.startswith("TDB 2022 01.3"))
     header = rows[0]
-    assert "Source quantité" in header
-    idx = header.index("Source quantité")
+    assert "Source quantité" not in header
+    calc_idx = header.index("Surface IFC OpenShell")
+    natif_idx = header.index("Surface Nette (Qté de Base)")
     piece_idx = header.index("Pièce")
-    by_name = {r[piece_idx]: r[idx] for r in rows[1:] if len(r) > idx}
-    assert by_name["CH1"] == "Calculée (IfcOpenShell)"
-    assert by_name["CH2"] == "Maquette"
+    par_piece = {r[piece_idx]: (r[calc_idx], r[natif_idx]) for r in rows[1:] if any(r)}
+    assert par_piece["CH1"][0] is not None and par_piece["CH1"][1] is None
+    assert par_piece["CH2"][1] is not None and par_piece["CH2"][0] is None
 
 
 # ── availability : statut partial_computed ──────────────────────────────
@@ -127,7 +130,9 @@ def test_availability_stays_partial_without_computed():
 def test_pack_shab_carries_methodo_note_and_computed_cell(tmp_path):
     pack = write_avp_i3f_report_pack(None, tmp_path / "out", snapshot=_snapshot(), export_pdf=False)
     text = _all_text(pack.shab_xlsx)
-    assert "Calculée (IfcOpenShell)" in text
+    # Le caractère calculé se lit désormais dans l'en-tête de la colonne qui
+    # porte la valeur, et non dans un libellé répété en bout de ligne.
+    assert "Surface IFC OpenShell" in text
     assert "contractuelles" in text  # note méthodo « valeurs NON contractuelles »
     assert "IfcOpenShell" in text
 

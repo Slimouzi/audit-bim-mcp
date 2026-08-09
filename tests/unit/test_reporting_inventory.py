@@ -34,17 +34,17 @@ def test_the_document_figures_match_the_measurement(report):
         lines[m["kind"]] += m["lines"]
 
     assert len(report["modules"]) == 23
-    assert sum(m["lines"] for m in report["modules"]) == 8322
+    assert sum(m["lines"] for m in report["modules"]) == 8567
     assert counts["façade"] == 0
-    assert counts["orchestration_i3f"] == 12 and lines["orchestration_i3f"] == 6042
-    assert counts["lié_livrable_i3f"] == 9 and lines["lié_livrable_i3f"] == 2273
+    assert counts["orchestration_i3f"] == 12 and lines["orchestration_i3f"] == 6085
+    assert counts["lié_livrable_i3f"] == 9 and lines["lié_livrable_i3f"] == 2475
     assert counts["sans_attache_directe"] == 2 and lines["sans_attache_directe"] == 7
 
     text = DOC.read_text(encoding="utf-8")
     for claim in (
-        "**8 322 lignes**",
+        "**8 567 lignes**",
         "| Façade pure vers `bim-reporting` | 0 | — |",
-        "| Lié au livrable I3F par ses appelants | 9 | 2 273 |",
+        "| Lié au livrable I3F par ses appelants | 9 | 2 475 |",
     ):
         assert claim in text, f"le document ne porte plus : {claim}"
 
@@ -102,8 +102,8 @@ def test_writing_modules_are_counted_as_claimed(report):
     """Le nombre de modules qui écrivent commande le coût de recette des lots."""
     writers = [m for m in report["modules"] if m["writes_files"]]
     assert len(writers) == 10
-    assert sum(m["lines"] for m in writers) == 4974
-    assert "**4 974 dans dix modules qui écrivent un fichier**" in DOC.read_text(encoding="utf-8")
+    assert sum(m["lines"] for m in writers) == 5015
+    assert "**5 015 dans dix modules qui écrivent un fichier**" in DOC.read_text(encoding="utf-8")
 
 
 def test_avp_snapshot_is_classified_by_use_not_only_by_imports(report):
@@ -116,7 +116,7 @@ def test_avp_snapshot_is_classified_by_use_not_only_by_imports(report):
     entry = next(m for m in report["modules"] if m["module"] == "avp_snapshot.py")
 
     assert entry["attaches"] == [] and entry["client_terms"] == []
-    assert entry["lines"] == 1102
+    assert entry["lines"] == 1304
     assert len(entry["consumers"]) == 6
     assert entry["deliverable_bound"] is True
     assert entry["kind"] == "lié_livrable_i3f", "le script doit porter la nuance lui-même"

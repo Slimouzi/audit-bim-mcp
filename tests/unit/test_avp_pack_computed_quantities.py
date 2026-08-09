@@ -237,7 +237,16 @@ def _cle(chemin: str) -> str:
 
 @pytest.mark.parametrize("annexe", ["shab_xlsx", "zones_espaces_xlsx"])
 def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
-    """La colonne « Source quantité » distingue le calculé du natif BIMData."""
+    """Une quantité calculée est tracée comme telle dans l'onglet de détail.
+
+    La provenance ne se lit plus dans une colonne « Source quantité » en bout
+    de ligne — absente du gabarit client, elle en déformait le tableau — mais à
+    **l'emplacement de la valeur** : ``Surface IFC OpenShell`` pour le calculé,
+    ``Surface Nette (Qté de Base)`` pour le natif, jamais les deux (doctrine
+    #210). L'exigence est inchangée : ce qui est interdit, c'est qu'une valeur
+    fusionnée sorte sans provenance — le symptôme d'origine (299 fois
+    « Information non disponible » dans cette colonne).
+    """
     sess, _ = session
     sess.snapshot = _snapshot_sans_quantites()
 
@@ -245,14 +254,29 @@ def test_quantity_source_is_traced_as_computed(session, tmp_path, annexe):
     assert res.get("status") != "error", res
 
     chemin = next(p for p in res["paths"] if _cle(p) == annexe)
-    textes = [str(c) for c in _cells(chemin) if c is not None]
-    # Une ligne par espace, chacune tracée comme calculée. D'autres colonnes
-    # (zone, étage…) peuvent rester légitimement non disponibles : ce qui est
-    # interdit, c'est que la SOURCE DE QUANTITÉ le soit alors qu'une valeur
-    # a été fusionnée — le symptôme d'origine (299 fois « Information non
-    # disponible » dans cette colonne).
-    assert sum(1 for t in textes if SOURCE_CALCULEE in t) >= 2, (
-        f"« {SOURCE_CALCULEE} » attendue une fois par espace dans {Path(chemin).name}"
+    wb = openpyxl.load_workbook(chemin)
+    ws = next(wb[t] for t in wb.sheetnames if t.startswith("TDB 2022 01.3"))
+    entetes = [c.value for c in ws[1]]
+    col_calc = entetes.index("Surface IFC OpenShell") + 1
+    col_natif = entetes.index("Surface Nette (Qté de Base)") + 1
+    assert "Source quantité" not in entetes
+
+    calculees = natives = 0
+    for ligne in range(2, ws.max_row + 1):
+        v_calc = ws.cell(ligne, col_calc).value
+        v_natif = ws.cell(ligne, col_natif).value
+        if v_calc is None and v_natif is None:
+            continue  # ligne de séparation / sous-total
+        assert (v_calc is None) != (v_natif is None), (
+            f"ligne {ligne} de {Path(chemin).name} : les deux colonnes de "
+            "mesure sont remplies, la provenance n'est plus lisible"
+        )
+        calculees += v_calc is not None
+        natives += v_natif is not None
+
+    assert calculees >= 2, (
+        f"surfaces fusionnées attendues en « Surface IFC OpenShell » dans "
+        f"{Path(chemin).name} (trouvé {calculees}, natives {natives})"
     )
 
 
