@@ -58,7 +58,7 @@ dependencies = [
     "pydantic>=2.6,<3",
     "matplotlib>=3.8,<4",
     "python-dotenv>=1.0,<2",
-    "fastmcp>=3.0,<4",
+    "fastmcp>=3.0,<5",
     "rapidfuzz>=3.6,<4",
     # Contrats communs (Finding, BimObject, filtres, WritePlan, ModelSnapshot)
     # et sandbox de chemins I/O (``bim_core.paths``, ex-``bim-sandbox``).
